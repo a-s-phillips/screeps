@@ -1,0 +1,18 @@
+{
+  "pserver": {
+    "token": "",
+    "protocol": "http",
+    "hostname": "localhost",
+    "port": 21025,
+    "path": "/",
+    "branch": "auto"
+  },
+  "main": {
+    "token": "your-auth-token",
+    "protocol": "https",
+    "hostname": "screeps.com",
+    "port": 443,
+    "path": "/",
+    "branch": "main"
+  }
+}
