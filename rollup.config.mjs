@@ -11,7 +11,9 @@ if (!dest) {
   console.log("No destination specified - code will be compiled but not uploaded");
 } else {
   if (!fs.existsSync("screeps.json")) {
-    throw new Error("screeps.json not found - copy screeps.json.example and fill in your credentials");
+    throw new Error(
+      "screeps.json not found - copy screeps.json.example and fill in your credentials"
+    );
   }
   const allConfig = JSON.parse(fs.readFileSync("screeps.json", "utf8"));
   config = allConfig[dest];
