@@ -7,6 +7,9 @@ import { DatabaseSync } from "node:sqlite";
 
 const DEST = process.env.SCREEPS_DEST ?? "main";
 const SEGMENT = Number(process.env.SCREEPS_LOG_SEGMENT ?? 0);
+// Default matches pserver (no rate limiting). The official server caps
+// GET /api/user/memory-segment at 360/hour (docs.screeps.com/auth-tokens.html) -
+// the "telemetry" npm script overrides this to 15000ms (240/hour) for that reason.
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 5000);
 const SQLITE_PATH = process.env.SQLITE_PATH ?? "./telemetry.sqlite";
 
