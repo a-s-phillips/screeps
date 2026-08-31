@@ -120,13 +120,17 @@ describe("runSpawning", () => {
     });
   });
 
-  it("does not log when spawnCreep fails", () => {
+  it("logs a spawn_failed event with the failure reason when spawnCreep fails", () => {
     const spawn = mockSpawn(false);
     (spawn.spawnCreep as ReturnType<typeof vi.fn>).mockReturnValue(ERR_NOT_ENOUGH_ENERGY);
 
     runSpawning(spawn, mockRoom());
 
-    expect(logger.log).not.toHaveBeenCalled();
+    expect(logger.log).toHaveBeenCalledWith("spawn_failed", {
+      role: "harvester",
+      result: ERR_NOT_ENOUGH_ENERGY
+    });
+    expect(logger.log).not.toHaveBeenCalledWith("spawn", expect.anything());
   });
 
   it("counts existing creeps in the room toward their role targets", () => {

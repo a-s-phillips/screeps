@@ -1,7 +1,7 @@
 export interface LogEntry {
   tick: number;
   event: string;
-  data?: Record<string, unknown>;
+  data?: object;
 }
 
 export function addLogEntry(buffer: LogEntry[], entry: LogEntry, maxEntries: number): LogEntry[] {

@@ -59,5 +59,7 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
 
   if (result === OK) {
     log("spawn", { role: decision.role, name });
+  } else {
+    log("spawn_failed", { role: decision.role, result });
   }
 }

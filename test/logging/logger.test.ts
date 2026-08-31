@@ -31,4 +31,18 @@ describe("logger", () => {
     const written = JSON.parse(RawMemory.segments[LOG_SEGMENT]);
     expect(written).toHaveLength(2);
   });
+
+  it("does not clear the buffer after a flush, so a slow poller doesn't miss entries", () => {
+    log("spawn", { role: "harvester" });
+    flushLogBuffer();
+
+    log("spawn", { role: "upgrader" });
+    flushLogBuffer();
+
+    const written = JSON.parse(RawMemory.segments[LOG_SEGMENT]);
+    expect(written).toEqual([
+      { tick: 100, event: "spawn", data: { role: "harvester" } },
+      { tick: 100, event: "spawn", data: { role: "upgrader" } }
+    ]);
+  });
 });

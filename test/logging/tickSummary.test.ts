@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTickSummary } from "../../src/logging/tickSummary";
+import { buildTickSummary, buildCpuSummary } from "../../src/logging/tickSummary";
 
 function mockRoom(name: string, energyAvailable: number, energyCapacityAvailable: number): Room {
   return { name, energyAvailable, energyCapacityAvailable } as Room;
@@ -23,5 +23,13 @@ describe("buildTickSummary", () => {
 
   it("returns an empty array when there are no visible rooms", () => {
     expect(buildTickSummary([], {})).toEqual([]);
+  });
+});
+
+describe("buildCpuSummary", () => {
+  it("reads used CPU and bucket from Game.cpu", () => {
+    const cpu = { getUsed: () => 4.2, bucket: 8500 } as CPU;
+
+    expect(buildCpuSummary(cpu)).toEqual({ used: 4.2, bucket: 8500 });
   });
 });

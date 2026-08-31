@@ -5,6 +5,10 @@ declare global {
     role: CreepRole;
     working: boolean;
   }
+
+  interface RoomMemory {
+    lastKnownRCL?: number;
+  }
 }
 
 export {};
