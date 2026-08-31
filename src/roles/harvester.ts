@@ -1,5 +1,10 @@
-import { getCachedFind } from "../utils/roomCache";
-import { decideWorkingState, harvestFromNearestSource, MOVE_OPTS } from "./shared";
+import {
+  decideWorkingState,
+  deliverEnergy,
+  findAdjacentContainerWithCapacity,
+  harvestFromNearestSource,
+  MOVE_OPTS
+} from "./shared";
 
 export function run(creep: Creep): void {
   const isEmpty = creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0;
@@ -12,13 +17,13 @@ export function run(creep: Creep): void {
     return;
   }
 
-  const spawn = getCachedFind(creep.room, FIND_MY_SPAWNS)[0];
-  if (spawn && spawn.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
-    if (creep.transfer(spawn, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-      creep.moveTo(spawn, MOVE_OPTS);
-    }
+  const container = findAdjacentContainerWithCapacity(creep);
+  if (container) {
+    creep.transfer(container, RESOURCE_ENERGY);
     return;
   }
+
+  if (deliverEnergy(creep)) return;
 
   if (creep.room.controller) {
     if (creep.upgradeController(creep.room.controller) === ERR_NOT_IN_RANGE) {

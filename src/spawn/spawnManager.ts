@@ -6,6 +6,7 @@ export interface RoomState {
   creepCounts: Record<CreepRole, number>;
   activeSourceCount: number;
   constructionSiteCount: number;
+  containerCount: number;
   energyAvailable: number;
   energyCapacityAvailable: number;
 }
@@ -18,6 +19,7 @@ interface SpawnDecision {
 export function decideNextSpawn(state: RoomState): SpawnDecision | null {
   const targets: { role: CreepRole; target: number }[] = [
     { role: "harvester", target: state.activeSourceCount * 2 },
+    { role: "hauler", target: state.containerCount },
     { role: "upgrader", target: 2 },
     { role: "builder", target: state.constructionSiteCount > 0 ? 2 : 0 }
   ];
@@ -35,7 +37,12 @@ export function decideNextSpawn(state: RoomState): SpawnDecision | null {
 export function runSpawning(spawn: StructureSpawn, room: Room): void {
   if (spawn.spawning) return;
 
-  const creepCounts: Record<CreepRole, number> = { harvester: 0, upgrader: 0, builder: 0 };
+  const creepCounts: Record<CreepRole, number> = {
+    harvester: 0,
+    upgrader: 0,
+    builder: 0,
+    hauler: 0
+  };
   for (const name in Game.creeps) {
     const creep = Game.creeps[name];
     if (creep.room.name === room.name) {
@@ -47,6 +54,9 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     creepCounts,
     activeSourceCount: getCachedFind(room, FIND_SOURCES_ACTIVE).length,
     constructionSiteCount: getCachedFind(room, FIND_CONSTRUCTION_SITES).length,
+    containerCount: getCachedFind(room, FIND_STRUCTURES).filter(
+      (structure) => structure.structureType === STRUCTURE_CONTAINER
+    ).length,
     energyAvailable: room.energyAvailable,
     energyCapacityAvailable: room.energyCapacityAvailable
   };

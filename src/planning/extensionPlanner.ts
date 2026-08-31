@@ -1,27 +1,7 @@
-const ROOM_MIN = 0;
-const ROOM_MAX = 49;
+import { inBounds, Point, tilesAtRing } from "../utils/grid";
+
 const MIN_RADIUS = 2;
 const MAX_RADIUS = 8;
-
-export interface Point {
-  x: number;
-  y: number;
-}
-
-function tilesAtRing(anchor: Point, radius: number): Point[] {
-  const tiles: Point[] = [];
-  for (let dy = -radius; dy <= radius; dy++) {
-    for (let dx = -radius; dx <= radius; dx++) {
-      if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
-      tiles.push({ x: anchor.x + dx, y: anchor.y + dy });
-    }
-  }
-  return tiles;
-}
-
-function inBounds(point: Point): boolean {
-  return point.x >= ROOM_MIN && point.x <= ROOM_MAX && point.y >= ROOM_MIN && point.y <= ROOM_MAX;
-}
 
 export function findExtensionSite(
   isWalkable: (x: number, y: number) => boolean,

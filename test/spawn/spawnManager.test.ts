@@ -7,9 +7,10 @@ vi.mock("../../src/logging/logger", () => ({ log: vi.fn() }));
 
 function baseState(overrides: Partial<RoomState> = {}): RoomState {
   return {
-    creepCounts: { harvester: 0, upgrader: 0, builder: 0 },
+    creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 0 },
     activeSourceCount: 1,
     constructionSiteCount: 0,
+    containerCount: 0,
     energyAvailable: 300,
     energyCapacityAvailable: 300,
     ...overrides
@@ -24,28 +25,46 @@ describe("decideNextSpawn", () => {
     expect(decision?.body.length).toBeGreaterThan(0);
   });
 
-  it("moves on to upgraders once harvester target is met", () => {
-    const state = baseState({ creepCounts: { harvester: 2, upgrader: 0, builder: 0 } });
+  it("moves on to upgraders once harvester target is met and there are no containers", () => {
+    const state = baseState({ creepCounts: { harvester: 2, upgrader: 0, builder: 0, hauler: 0 } });
+
+    expect(decideNextSpawn(state)?.role).toBe("upgrader");
+  });
+
+  it("wants a hauler once containers exist and the harvester target is met", () => {
+    const state = baseState({
+      creepCounts: { harvester: 2, upgrader: 0, builder: 0, hauler: 0 },
+      containerCount: 1
+    });
+
+    expect(decideNextSpawn(state)?.role).toBe("hauler");
+  });
+
+  it("moves on to upgraders once both harvester and hauler targets are met", () => {
+    const state = baseState({
+      creepCounts: { harvester: 2, upgrader: 0, builder: 0, hauler: 1 },
+      containerCount: 1
+    });
 
     expect(decideNextSpawn(state)?.role).toBe("upgrader");
   });
 
   it("only wants builders when there are construction sites", () => {
     const state = baseState({
-      creepCounts: { harvester: 2, upgrader: 2, builder: 0 },
+      creepCounts: { harvester: 2, upgrader: 2, builder: 0, hauler: 0 },
       constructionSiteCount: 0
     });
     expect(decideNextSpawn(state)).toBeNull();
 
     const withSites = baseState({
-      creepCounts: { harvester: 2, upgrader: 2, builder: 0 },
+      creepCounts: { harvester: 2, upgrader: 2, builder: 0, hauler: 0 },
       constructionSiteCount: 3
     });
     expect(decideNextSpawn(withSites)?.role).toBe("builder");
   });
 
   it("returns null once every target is met", () => {
-    const state = baseState({ creepCounts: { harvester: 2, upgrader: 2, builder: 0 } });
+    const state = baseState({ creepCounts: { harvester: 2, upgrader: 2, builder: 0, hauler: 0 } });
 
     expect(decideNextSpawn(state)).toBeNull();
   });
@@ -53,7 +72,7 @@ describe("decideNextSpawn", () => {
   it("skips an unaffordable priority role in favor of a cheaper one that's still under target", () => {
     // harvester block costs 300, upgrader block costs 200
     const state = baseState({
-      creepCounts: { harvester: 0, upgrader: 0, builder: 0 },
+      creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 0 },
       energyAvailable: 200
     });
 
@@ -73,7 +92,7 @@ describe("decideNextSpawn", () => {
     // harvester (300 energy) that's stuck that size forever. The fix should
     // instead wait: neither role's ideal, capacity-sized body is affordable yet.
     const state = baseState({
-      creepCounts: { harvester: 0, upgrader: 0, builder: 0 },
+      creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 0 },
       energyAvailable: 300,
       energyCapacityAvailable: 800
     });
@@ -93,7 +112,12 @@ describe("runSpawning", () => {
     vi.unstubAllGlobals();
   });
 
-  function mockRoom() {
+  function mockRoom(opts: { containers?: number } = {}) {
+    const containers = Array.from({ length: opts.containers ?? 0 }, (_, i) => ({
+      id: `container${i}`,
+      structureType: STRUCTURE_CONTAINER
+    }));
+
     return {
       name: "W1N1",
       energyAvailable: 300,
@@ -101,6 +125,7 @@ describe("runSpawning", () => {
       find: vi.fn((type: FindConstant) => {
         if (type === FIND_SOURCES_ACTIVE) return [{ id: "source1" }];
         if (type === FIND_CONSTRUCTION_SITES) return [];
+        if (type === FIND_STRUCTURES) return containers;
         return [];
       })
     } as unknown as Room;
@@ -182,5 +207,22 @@ describe("runSpawning", () => {
     runSpawning(spawn, mockRoom());
 
     expect(spawn.spawnCreep).not.toHaveBeenCalled();
+  });
+
+  it("spawns a hauler once the harvester target is met and a container exists", () => {
+    vi.stubGlobal("Game", {
+      time: 12345,
+      creeps: {
+        h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } }
+      }
+    });
+    const spawn = mockSpawn(false);
+
+    runSpawning(spawn, mockRoom({ containers: 1 }));
+
+    expect(spawn.spawnCreep).toHaveBeenCalledWith(expect.any(Array), "hauler_12345", {
+      memory: { role: "hauler", working: false }
+    });
   });
 });

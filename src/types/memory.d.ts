@@ -1,5 +1,5 @@
 declare global {
-  type CreepRole = "harvester" | "upgrader" | "builder";
+  type CreepRole = "harvester" | "upgrader" | "builder" | "hauler";
 
   interface CreepMemory {
     role: CreepRole;

@@ -11,6 +11,7 @@ describe("planBody", () => {
     expect(planBody("upgrader", 200)).toEqual([WORK, CARRY, MOVE]);
     expect(planBody("builder", 200)).toEqual([WORK, CARRY, MOVE]);
     expect(planBody("harvester", 300)).toEqual([WORK, WORK, CARRY, MOVE]);
+    expect(planBody("hauler", 100)).toEqual([CARRY, MOVE]);
   });
 
   it("repeats the block as many times as the capacity budget allows", () => {
@@ -18,7 +19,7 @@ describe("planBody", () => {
   });
 
   it("never exceeds MAX_CREEP_SIZE parts or the capacity budget, even with unlimited capacity", () => {
-    for (const role of ["upgrader", "builder"] as const) {
+    for (const role of ["upgrader", "builder", "hauler"] as const) {
       const body = planBody(role, 50_000);
       const cost = body.reduce((sum, part) => sum + BODYPART_COST[part], 0);
 

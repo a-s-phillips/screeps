@@ -29,6 +29,8 @@ Object.assign(globalThis, {
   RESOURCE_ENERGY: "energy",
 
   STRUCTURE_EXTENSION: "extension",
+  STRUCTURE_CONTAINER: "container",
+  STRUCTURE_SPAWN: "spawn",
   TERRAIN_MASK_WALL: 1,
   TERRAIN_MASK_SWAMP: 2,
 
@@ -48,6 +50,7 @@ Object.assign(globalThis, {
     claim: 600
   },
   CONTROLLER_STRUCTURES: {
-    extension: { 0: 0, 1: 0, 2: 5, 3: 10, 4: 20, 5: 30, 6: 40, 7: 50, 8: 60 }
+    extension: { 0: 0, 1: 0, 2: 5, 3: 10, 4: 20, 5: 30, 6: 40, 7: 50, 8: 60 },
+    container: { 0: 5, 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 5, 8: 5 }
   }
 });

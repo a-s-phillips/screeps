@@ -1,7 +1,8 @@
 const BASE_BLOCKS: Record<CreepRole, BodyPartConstant[]> = {
   harvester: [WORK, WORK, CARRY, MOVE],
   upgrader: [WORK, CARRY, MOVE],
-  builder: [WORK, CARRY, MOVE]
+  builder: [WORK, CARRY, MOVE],
+  hauler: [CARRY, MOVE]
 };
 
 // A source regenerates SOURCE_ENERGY_CAPACITY every ENERGY_REGEN_TIME ticks; each WORK
