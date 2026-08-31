@@ -34,6 +34,9 @@ Object.assign(globalThis, {
 
   MAX_CREEP_SIZE: 50,
   CARRY_CAPACITY: 50,
+  HARVEST_POWER: 2,
+  SOURCE_ENERGY_CAPACITY: 3000,
+  ENERGY_REGEN_TIME: 300,
   BODYPART_COST: {
     move: 50,
     work: 100,

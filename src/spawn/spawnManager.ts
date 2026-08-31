@@ -1,12 +1,13 @@
 import { log } from "../logging/logger";
 import { getCachedFind } from "../utils/roomCache";
-import { planBody } from "./bodyPlanner";
+import { bodyCost, planBody } from "./bodyPlanner";
 
 export interface RoomState {
   creepCounts: Record<CreepRole, number>;
   activeSourceCount: number;
   constructionSiteCount: number;
   energyAvailable: number;
+  energyCapacityAvailable: number;
 }
 
 interface SpawnDecision {
@@ -24,8 +25,8 @@ export function decideNextSpawn(state: RoomState): SpawnDecision | null {
   for (const { role, target } of targets) {
     if (state.creepCounts[role] >= target) continue;
 
-    const body = planBody(role, state.energyAvailable);
-    if (body.length > 0) return { role, body };
+    const body = planBody(role, state.energyCapacityAvailable);
+    if (body.length > 0 && bodyCost(body) <= state.energyAvailable) return { role, body };
   }
 
   return null;
@@ -46,7 +47,8 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     creepCounts,
     activeSourceCount: getCachedFind(room, FIND_SOURCES_ACTIVE).length,
     constructionSiteCount: getCachedFind(room, FIND_CONSTRUCTION_SITES).length,
-    energyAvailable: room.energyAvailable
+    energyAvailable: room.energyAvailable,
+    energyCapacityAvailable: room.energyCapacityAvailable
   };
 
   const decision = decideNextSpawn(state);

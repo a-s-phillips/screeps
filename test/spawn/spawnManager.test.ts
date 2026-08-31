@@ -11,6 +11,7 @@ function baseState(overrides: Partial<RoomState> = {}): RoomState {
     activeSourceCount: 1,
     constructionSiteCount: 0,
     energyAvailable: 300,
+    energyCapacityAvailable: 300,
     ...overrides
   };
 }
@@ -64,6 +65,21 @@ describe("decideNextSpawn", () => {
 
     expect(decideNextSpawn(state)).toBeNull();
   });
+
+  it("skips a role for this tick rather than downsizing its body to fit leftover energy", () => {
+    // Capacity supports a full 2-block (600 energy) harvester and a 4-block (800
+    // energy) upgrader, but only 300 energy is on hand right now. Sizing off
+    // available energy (the old, buggy behavior) would spawn a runt 1-block
+    // harvester (300 energy) that's stuck that size forever. The fix should
+    // instead wait: neither role's ideal, capacity-sized body is affordable yet.
+    const state = baseState({
+      creepCounts: { harvester: 0, upgrader: 0, builder: 0 },
+      energyAvailable: 300,
+      energyCapacityAvailable: 800
+    });
+
+    expect(decideNextSpawn(state)).toBeNull();
+  });
 });
 
 describe("runSpawning", () => {
@@ -81,6 +97,7 @@ describe("runSpawning", () => {
     return {
       name: "W1N1",
       energyAvailable: 300,
+      energyCapacityAvailable: 300,
       find: vi.fn((type: FindConstant) => {
         if (type === FIND_SOURCES_ACTIVE) return [{ id: "source1" }];
         if (type === FIND_CONSTRUCTION_SITES) return [];
