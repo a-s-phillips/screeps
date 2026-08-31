@@ -4,5 +4,5 @@ screeps.json
 *.log
 coverage/
 .direnv/
-*.sqlite
+*.sqlite*
 CLAUDE.md

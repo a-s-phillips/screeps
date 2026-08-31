@@ -11,8 +11,11 @@ Object.assign(globalThis, {
   FIND_HOSTILE_CREEPS: 103,
   FIND_SOURCES_ACTIVE: 104,
   FIND_SOURCES: 105,
+  FIND_STRUCTURES: 107,
+  FIND_MY_STRUCTURES: 108,
   FIND_CONSTRUCTION_SITES: 111,
   FIND_MY_SPAWNS: 112,
+  FIND_MY_CONSTRUCTION_SITES: 114,
 
   MOVE: "move",
   WORK: "work",
@@ -25,6 +28,10 @@ Object.assign(globalThis, {
 
   RESOURCE_ENERGY: "energy",
 
+  STRUCTURE_EXTENSION: "extension",
+  TERRAIN_MASK_WALL: 1,
+  TERRAIN_MASK_SWAMP: 2,
+
   MAX_CREEP_SIZE: 50,
   CARRY_CAPACITY: 50,
   BODYPART_COST: {
@@ -36,5 +43,8 @@ Object.assign(globalThis, {
     ranged_attack: 150,
     tough: 10,
     claim: 600
+  },
+  CONTROLLER_STRUCTURES: {
+    extension: { 0: 0, 1: 0, 2: 5, 3: 10, 4: 20, 5: 30, 6: 40, 7: 50, 8: 60 }
   }
 });
