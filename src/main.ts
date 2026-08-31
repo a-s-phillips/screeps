@@ -1,3 +1,5 @@
+import { flushLogBuffer, log } from "./logging/logger";
+import { buildTickSummary } from "./logging/tickSummary";
 import { cleanUpDeadCreepMemory } from "./memory/cleanup";
 import { run as runBuilder } from "./roles/builder";
 import { run as runHarvester } from "./roles/harvester";
@@ -24,4 +26,7 @@ export function loop(): void {
     const creep = Game.creeps[creepName];
     roleRunners[creep.memory.role](creep);
   }
+
+  log("tick_summary", { rooms: buildTickSummary(Object.values(Game.rooms), Game.creeps) });
+  flushLogBuffer();
 }

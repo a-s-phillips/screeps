@@ -1,3 +1,4 @@
+import { log } from "../logging/logger";
 import { getCachedFind } from "../utils/roomCache";
 import { planBody } from "./bodyPlanner";
 
@@ -52,5 +53,11 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
   if (!decision) return;
 
   const name = `${decision.role}_${Game.time}`;
-  spawn.spawnCreep(decision.body, name, { memory: { role: decision.role, working: false } });
+  const result = spawn.spawnCreep(decision.body, name, {
+    memory: { role: decision.role, working: false }
+  });
+
+  if (result === OK) {
+    log("spawn", { role: decision.role, name });
+  }
 }

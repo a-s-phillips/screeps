@@ -13,6 +13,7 @@
     "hostname": "screeps.com",
     "port": 443,
     "path": "/",
-    "branch": "main"
+    "branch": "main",
+    "shard": "shard3"
   }
 }

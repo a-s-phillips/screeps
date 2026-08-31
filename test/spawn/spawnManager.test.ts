@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { decideNextSpawn, runSpawning, RoomState } from "../../src/spawn/spawnManager";
 import { resetRoomCache } from "../../src/utils/roomCache";
+import * as logger from "../../src/logging/logger";
+
+vi.mock("../../src/logging/logger", () => ({ log: vi.fn() }));
 
 function baseState(overrides: Partial<RoomState> = {}): RoomState {
   return {
@@ -67,6 +70,7 @@ describe("runSpawning", () => {
   beforeEach(() => {
     resetRoomCache();
     vi.stubGlobal("Game", { creeps: {}, time: 12345 });
+    vi.mocked(logger.log).mockClear();
   });
 
   afterEach(() => {
@@ -110,6 +114,19 @@ describe("runSpawning", () => {
       "harvester_12345",
       { memory: { role: "harvester", working: false } }
     );
+    expect(logger.log).toHaveBeenCalledWith("spawn", {
+      role: "harvester",
+      name: "harvester_12345"
+    });
+  });
+
+  it("does not log when spawnCreep fails", () => {
+    const spawn = mockSpawn(false);
+    (spawn.spawnCreep as ReturnType<typeof vi.fn>).mockReturnValue(ERR_NOT_ENOUGH_ENERGY);
+
+    runSpawning(spawn, mockRoom());
+
+    expect(logger.log).not.toHaveBeenCalled();
   });
 
   it("counts existing creeps in the room toward their role targets", () => {

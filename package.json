@@ -8,6 +8,8 @@
     "watch": "rollup -cw",
     "push-pserver": "rollup -c --environment DEST:pserver",
     "push-main": "rollup -c --environment DEST:main",
+    "telemetry": "node tools/telemetry/poller.mjs",
+    "telemetry:pserver": "SCREEPS_DEST=pserver node tools/telemetry/poller.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
