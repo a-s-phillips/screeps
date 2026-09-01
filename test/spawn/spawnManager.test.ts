@@ -158,15 +158,70 @@ describe("decideNextSpawn", () => {
     expect(decideNextSpawn(state)).toBeNull();
   });
 
-  it("skips a role for this tick rather than downsizing its body, once a hauler already feeds the spawn", () => {
-    // Same idea, but the spawn-feeder is a hauler instead of a harvester - either
-    // one means the room isn't stuck, so no need to shrink.
+  it("skips a role for this tick rather than downsizing its body, once a working hauler+miner pair feeds the spawn", () => {
+    // A hauler alone can't feed the spawn - it has nothing to haul without a miner
+    // filling a container for it (see the live-bug test below). With both present,
+    // energy genuinely is flowing in, so it's fine to wait for the ideal,
+    // capacity-sized body instead of shrinking.
     const state = baseState({
-      creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 1, miner: 0 },
+      creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 1, miner: 1 },
       sourcesWithoutContainerCount: 0,
       containerCount: 2,
       energyAvailable: 300,
       energyCapacityAvailable: 1300
+    });
+
+    expect(decideNextSpawn(state)).toBeNull();
+  });
+
+  it("sizes a hauler down when it exists but no miner does, since a hauler alone can't generate any income", () => {
+    // Found live on pserver: the room had 1 hauler and 0 miners. The old
+    // "a hauler alone counts as unstuck" rule treated that as a working economy, but a
+    // hauler with nothing to haul can't grow energyAvailable at all - it sat frozen at
+    // exactly the same value for hundreds of consecutive ticks. A hauler needs a miner
+    // (or being a harvester itself) to actually count as unstuck.
+    const state = baseState({
+      creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 1, miner: 0 },
+      sourcesWithoutContainerCount: 0,
+      containerCount: 2,
+      energyAvailable: 450,
+      energyCapacityAvailable: 1650
+    });
+
+    const decision = decideNextSpawn(state);
+
+    expect(decision?.role).toBe("hauler");
+    expect(decision?.body).toEqual([CARRY, MOVE, CARRY, MOVE, CARRY, MOVE, CARRY, MOVE]);
+  });
+
+  it("sizes the hauler body down to fit available energy when severely under target, even with a working economy", () => {
+    // A working hauler+miner economy is only "unstuck" up to a point - with a hauler
+    // target of 5 and only 1 spawned, a single hauler couldn't grow energyAvailable
+    // fast enough to ever afford a second at full size, leaving the room hauler-starved
+    // for hundreds of ticks. Being more than one short of target downsizes instead of
+    // waiting indefinitely - being merely one short (see the tests above/below) still
+    // waits, since that's close enough to target for quality to matter more than speed.
+    const state = baseState({
+      creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 1, miner: 1 },
+      sourcesWithoutContainerCount: 0,
+      containerCount: 5,
+      energyAvailable: 450,
+      energyCapacityAvailable: 1500
+    });
+
+    const decision = decideNextSpawn(state);
+
+    expect(decision?.role).toBe("hauler");
+    expect(decision?.body).toEqual([CARRY, MOVE, CARRY, MOVE, CARRY, MOVE, CARRY, MOVE]);
+  });
+
+  it("still waits for full capacity when only one short of the hauler target, with a working economy", () => {
+    const state = baseState({
+      creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 4, miner: 1 },
+      sourcesWithoutContainerCount: 0,
+      containerCount: 5,
+      energyAvailable: 450,
+      energyCapacityAvailable: 1500
     });
 
     expect(decideNextSpawn(state)).toBeNull();

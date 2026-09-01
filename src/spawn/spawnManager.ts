@@ -48,19 +48,20 @@ function builderTargetFor(state: RoomState): number {
 }
 
 export function decideNextSpawn(state: RoomState): SpawnDecision | null {
-  // Only harvester (self-delivers) and hauler (withdraws from a container, delivers to
-  // spawn) ever get energy INTO the spawn - a miner alone just piles energy up in a
-  // container that nothing collects. With neither a harvester nor a hauler, energy can
-  // only shrink from here, so waiting for the full-capacity "ideal" body to become
-  // affordable would deadlock the room forever (confirmed live: a lone bootstrap miner
-  // filled its container while the hauler needed to move that energy stayed
-  // permanently unaffordable at full sizing). Size the roles that can restore a
-  // spawn-feeder - harvester, miner, and hauler - down to whatever's actually on hand
-  // in that one case. Once a harvester or hauler exists, revert to the normal "wait,
-  // don't shrink" policy - the room isn't stuck, so there's no need to risk a
-  // permanently undersized creep.
-  const hasSpawnFeeder = state.creepCounts.harvester + state.creepCounts.hauler > 0;
-  const bootstrapSizingCapacity = hasSpawnFeeder
+  // A harvester alone can grow the spawn's energy (it self-delivers), and so can a
+  // miner+hauler pair (miner fills a container, hauler relays it) - but a hauler
+  // *without* a miner has nothing to haul, and a miner *without* a hauler just piles
+  // energy up in a container nothing collects. Either half alone is exactly as stuck as
+  // having neither: confirmed live twice - once as a lone bootstrap miner with an
+  // unaffordable full-size hauler, and again as a lone hauler with zero miners, where
+  // energyAvailable sat frozen for hundreds of ticks because every miner/harvester/
+  // hauler spawn attempt sized itself for full capacity and nothing was affordable.
+  // Size the roles that can restore a working economy - harvester, miner, and hauler -
+  // down to whatever's actually on hand until a genuine harvester-or-pair exists.
+  const hasWorkingEconomy =
+    state.creepCounts.harvester > 0 ||
+    (state.creepCounts.miner > 0 && state.creepCounts.hauler > 0);
+  const bootstrapSizingCapacity = hasWorkingEconomy
     ? state.energyCapacityAvailable
     : Math.min(state.energyCapacityAvailable, state.energyAvailable);
 
@@ -71,13 +72,34 @@ export function decideNextSpawn(state: RoomState): SpawnDecision | null {
     }
   }
 
+  // Once a working economy exists, it's ordinarily worth waiting for the full-capacity
+  // "ideal" body instead of risking a permanently undersized creep (see the "skips a
+  // role" tests). But that only holds while the role is close to its target - confirmed
+  // live: with a hauler target of 5 and only 1 spawned, a single hauler couldn't grow
+  // energyAvailable fast enough to ever afford a second at full size, leaving the room
+  // hauler-starved for hundreds of ticks. Being more than one creep short of target is
+  // treated the same as not having a working economy at all: downsize now rather than wait.
+  function feederSizingCapacity(role: "harvester" | "hauler", target: number): number {
+    const severelyUnderTarget = target - state.creepCounts[role] > 1;
+    return hasWorkingEconomy && !severelyUnderTarget
+      ? state.energyCapacityAvailable
+      : Math.min(state.energyCapacityAvailable, state.energyAvailable);
+  }
+
+  const harvesterTarget = harvesterTargetFor(state);
+  const haulerTarget = state.containerCount;
+
   const targets: { role: Exclude<CreepRole, "miner">; target: number; sizingCapacity: number }[] = [
     {
       role: "harvester",
-      target: harvesterTargetFor(state),
-      sizingCapacity: bootstrapSizingCapacity
+      target: harvesterTarget,
+      sizingCapacity: feederSizingCapacity("harvester", harvesterTarget)
     },
-    { role: "hauler", target: state.containerCount, sizingCapacity: bootstrapSizingCapacity },
+    {
+      role: "hauler",
+      target: haulerTarget,
+      sizingCapacity: feederSizingCapacity("hauler", haulerTarget)
+    },
     {
       role: "upgrader",
       target: upgraderTargetFor(state),
