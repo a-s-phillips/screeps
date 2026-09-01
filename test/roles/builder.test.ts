@@ -3,7 +3,10 @@ import { run } from "../../src/roles/builder";
 import { MOVE_OPTS } from "../../src/roles/shared";
 import { resetRoomCache } from "../../src/utils/roomCache";
 
-const source = { id: "source1" };
+// Far from the default creep pos (0,0) - keeps the default scenario "no active source
+// adjacent", so existing tests still exercise the withdraw/harvest fallback path unless
+// a test deliberately places the creep next to it.
+const source = { id: "source1", pos: { x: 20, y: 20 } };
 const controller = { id: "controller1" };
 const site = { id: "site1" };
 
@@ -13,16 +16,20 @@ function mockCreep(opts: {
   freeCapacity: number;
   sites?: unknown[];
   containers?: { id: string; usedCapacity: number }[];
+  sources?: unknown[];
+  pos?: { x: number; y: number };
   buildResult?: ScreepsReturnCode;
   upgradeResult?: ScreepsReturnCode;
 }) {
   const sites = opts.sites ?? [site];
   const containers = opts.containers ?? [];
+  const sources = opts.sources ?? [source];
+  const pos = opts.pos ?? { x: 0, y: 0 };
   const room = {
     name: "W1N1",
     controller,
     find: vi.fn((type: FindConstant) => {
-      if (type === FIND_SOURCES_ACTIVE) return [source];
+      if (type === FIND_SOURCES_ACTIVE) return sources;
       if (type === FIND_CONSTRUCTION_SITES) return sites;
       if (type === FIND_STRUCTURES) {
         return containers.map((c) => ({
@@ -38,7 +45,7 @@ function mockCreep(opts: {
   return {
     memory: { role: "builder", working: opts.working },
     room,
-    pos: { findClosestByPath: vi.fn((targets: unknown[]) => targets[0] ?? null) },
+    pos: { ...pos, findClosestByPath: vi.fn((targets: unknown[]) => targets[0] ?? null) },
     store: {
       getUsedCapacity: vi.fn().mockReturnValue(opts.usedEnergy),
       getFreeCapacity: vi.fn().mockReturnValue(opts.freeCapacity)
@@ -147,5 +154,26 @@ describe("builder role", () => {
     run(creep);
 
     expect(creep.build).toHaveBeenCalledWith(siteA);
+  });
+
+  it("harvests directly from an adjacent active source instead of traveling to a fuller container", () => {
+    // A builder parked next to a source (e.g. building that source's container) should
+    // harvest it directly rather than trek across the room for a container's leftovers -
+    // zero travel, and it's otherwise-uncollected income rather than energy diverted
+    // from what a hauler would've delivered to spawn/extensions.
+    const nearbySource = { id: "source1", pos: { x: 11, y: 10 } };
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 0,
+      freeCapacity: 50,
+      pos: { x: 10, y: 10 },
+      sources: [nearbySource],
+      containers: [{ id: "container1", usedCapacity: 50 }]
+    });
+
+    run(creep);
+
+    expect(creep.harvest).toHaveBeenCalledWith(nearbySource);
+    expect(creep.withdraw).not.toHaveBeenCalled();
   });
 });

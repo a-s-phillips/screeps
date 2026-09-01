@@ -76,6 +76,11 @@ export function withdrawFromFullestContainer(creep: Creep, exclude?: StructureCo
   return true;
 }
 
+export function findAdjacentActiveSource(creep: Creep): Source | undefined {
+  const sources = getCachedFind(creep.room, FIND_SOURCES_ACTIVE);
+  return sources.find((source) => chebyshevDistance(creep.pos, source.pos) <= 1);
+}
+
 export function findAdjacentContainerWithCapacity(creep: Creep): StructureContainer | undefined {
   const containers = getCachedFind(creep.room, FIND_STRUCTURES).filter(
     (structure): structure is StructureContainer =>

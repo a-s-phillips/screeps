@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   decideWorkingState,
   deliverEnergy,
+  findAdjacentActiveSource,
   findAdjacentContainerWithCapacity,
   findContainerAtSource,
   harvestFromNearestSource,
@@ -244,6 +245,32 @@ describe("findAdjacentContainerWithCapacity", () => {
     ]);
 
     expect(findAdjacentContainerWithCapacity(creep)).toBeUndefined();
+  });
+});
+
+function mockActiveSourceCreep(pos: { x: number; y: number }, sources: { x: number; y: number }[]) {
+  return {
+    room: {
+      name: "W1N1",
+      find: vi.fn().mockReturnValue(sources.map((sourcePos) => ({ pos: sourcePos })))
+    },
+    pos
+  } as unknown as Creep;
+}
+
+describe("findAdjacentActiveSource", () => {
+  it("returns an active source within range 1", () => {
+    const creep = mockActiveSourceCreep({ x: 10, y: 10 }, [{ x: 11, y: 10 }]);
+
+    const result = findAdjacentActiveSource(creep);
+
+    expect(result).toEqual(expect.objectContaining({ pos: { x: 11, y: 10 } }));
+  });
+
+  it("returns undefined when no active source is within range 1", () => {
+    const creep = mockActiveSourceCreep({ x: 10, y: 10 }, [{ x: 12, y: 10 }]);
+
+    expect(findAdjacentActiveSource(creep)).toBeUndefined();
   });
 });
 
