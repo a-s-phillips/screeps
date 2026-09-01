@@ -651,6 +651,58 @@ describe("runSpawning", () => {
     expect(spawn.spawnCreep).not.toHaveBeenCalled();
   });
 
+  it("pre-spawns a replacement hauler once one is nearing death", () => {
+    // planBody("hauler", 300) -> [CARRY, MOVE] x3 (length 6). Spawn at (0,0), the
+    // (non-source-adjacent) container at (40,40) (chebyshev 40) -> lead time =
+    // 6 * CREEP_SPAWN_TIME + 40 = 58. A ticksToLive of 30 is under that, so the dying
+    // hauler shouldn't count toward the (1-container) target of 1 - leaving room for a
+    // 2nd.
+    vi.stubGlobal("Game", {
+      time: 12345,
+      creeps: {
+        h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        u1: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } },
+        u2: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } },
+        x1: {
+          room: { name: "W1N1" },
+          memory: { role: "hauler", working: false },
+          ticksToLive: 30
+        }
+      }
+    });
+    const spawn = mockSpawn(false);
+
+    runSpawning(spawn, mockRoom({ containers: 1 }));
+
+    expect(spawn.spawnCreep).toHaveBeenCalledWith(expect.any(Array), "hauler_12345", {
+      memory: { role: "hauler", working: false }
+    });
+  });
+
+  it("does not pre-spawn a hauler replacement while ticksToLive is comfortably above the lead time", () => {
+    // Same setup (lead time 58), but ticksToLive 100 is well above it.
+    vi.stubGlobal("Game", {
+      time: 12345,
+      creeps: {
+        h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        u1: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } },
+        u2: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } },
+        x1: {
+          room: { name: "W1N1" },
+          memory: { role: "hauler", working: false },
+          ticksToLive: 100
+        }
+      }
+    });
+    const spawn = mockSpawn(false);
+
+    runSpawning(spawn, mockRoom({ containers: 1 }));
+
+    expect(spawn.spawnCreep).not.toHaveBeenCalled();
+  });
+
   it("does not recycle harvesters when the count is at or below target", () => {
     vi.stubGlobal("Game", {
       time: 12345,

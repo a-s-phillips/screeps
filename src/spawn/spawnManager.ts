@@ -141,16 +141,22 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
   // treat that as healthy since it can't need a replacement before it even exists.
   const minerTicksToLiveBySource = new Map<Id<Source>, number>();
 
-  // Upgraders and builders are fungible (unlike miners, any one can replace any other
-  // of the same role), so a dying one just needs to stop counting toward the target
-  // early - decideNextSpawn's usual "under target" check takes care of the rest.
+  const containers = getCachedFind(room, FIND_STRUCTURES).filter(
+    (structure): structure is StructureContainer => structure.structureType === STRUCTURE_CONTAINER
+  );
+
+  // Upgraders, builders, and haulers are fungible (unlike miners, any one can replace
+  // any other of the same role), so a dying one just needs to stop counting toward the
+  // target early - decideNextSpawn's usual "under target" check takes care of the rest.
   //
   // Working upgraders always head straight for the controller (see upgrader.ts) - a
   // fixed position - so, same as the miner case, that lead time is precise. Builders
   // re-target every tick to whichever construction site is closest by path (or the
-  // controller once none remain, see builder.ts), so there's no fixed destination to
-  // precompute a distance to in advance - "spawn -> nearest site right now" is the best
-  // available proxy for where a freshly-spawned builder would actually head, and it's
+  // controller once none remain, see builder.ts), and haulers re-target every tick
+  // between whichever container needs withdrawing from and wherever energy needs
+  // delivering (hauler.ts) - neither has a fixed destination to precompute a distance
+  // to in advance. "spawn -> nearest site/container right now" is the best available
+  // proxy for where a freshly-spawned creep would actually head first, and it's
   // inherently a soft estimate rather than a guarantee.
   const upgraderLeadTime = room.controller
     ? replacementLeadTime(
@@ -168,9 +174,18 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
       )
     : 0;
 
+  const nearestContainer = spawn.pos.findClosestByPath(containers);
+  const haulerLeadTime = nearestContainer
+    ? replacementLeadTime(
+        planBody("hauler", room.energyCapacityAvailable).length,
+        chebyshevDistance(spawn.pos, nearestContainer.pos)
+      )
+    : 0;
+
   const preSpawnLeadTimeByRole: Partial<Record<CreepRole, number>> = {
     upgrader: upgraderLeadTime,
-    builder: builderLeadTime
+    builder: builderLeadTime,
+    hauler: haulerLeadTime
   };
 
   for (const name in Game.creeps) {
@@ -193,9 +208,6 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
   }
 
   const activeSources = getCachedFind(room, FIND_SOURCES_ACTIVE);
-  const containers = getCachedFind(room, FIND_STRUCTURES).filter(
-    (structure): structure is StructureContainer => structure.structureType === STRUCTURE_CONTAINER
-  );
   const sourceContainer = (source: Source) =>
     containers.find((container) => chebyshevDistance(source.pos, container.pos) <= 1);
   const minerBodyLength = planMinerBody(room.energyCapacityAvailable).length;
