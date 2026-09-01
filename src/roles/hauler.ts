@@ -4,7 +4,7 @@ import {
   decideWorkingState,
   deliverEnergy,
   MOVE_OPTS,
-  withdrawFromNearestContainer
+  withdrawFromFullestContainer
 } from "./shared";
 
 function findControllerContainer(room: Room): StructureContainer | undefined {
@@ -33,7 +33,7 @@ export function run(creep: Creep): void {
     // starving upgraders of the container's whole point. Found live: haulers were
     // parking next to it and cycling withdraw/deposit while source containers sat
     // nearly full, undrained, on the other side of the room.
-    withdrawFromNearestContainer(creep, controllerContainer);
+    withdrawFromFullestContainer(creep, controllerContainer);
     return;
   }
 

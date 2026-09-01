@@ -6,7 +6,7 @@ import {
   findContainerAtSource,
   harvestFromNearestSource,
   MOVE_OPTS,
-  withdrawFromNearestContainer
+  withdrawFromFullestContainer
 } from "../../src/roles/shared";
 import { resetRoomCache } from "../../src/utils/roomCache";
 
@@ -245,14 +245,16 @@ describe("findContainerAtSource", () => {
 
 function mockWithdrawCreep(
   overrides: {
-    containers?: { id: string; usedCapacity: number }[];
+    containers?: { id: string; usedCapacity: number; pos?: { x: number; y: number } }[];
     withdrawResult?: ScreepsReturnCode;
+    creepPos?: { x: number; y: number };
   } = {}
 ) {
   const containers = overrides.containers ?? [{ id: "container1", usedCapacity: 50 }];
   const targets = containers.map((c) => ({
     id: c.id,
     structureType: STRUCTURE_CONTAINER,
+    pos: c.pos ?? { x: 0, y: 0 },
     store: { getUsedCapacity: () => c.usedCapacity }
   }));
 
@@ -261,19 +263,17 @@ function mockWithdrawCreep(
       name: "W1N1",
       find: vi.fn().mockReturnValue(targets)
     },
-    pos: {
-      findClosestByPath: vi.fn((candidates: unknown[]) => candidates[0] ?? null)
-    },
+    pos: overrides.creepPos ?? { x: 0, y: 0 },
     withdraw: vi.fn().mockReturnValue(overrides.withdrawResult ?? OK),
     moveTo: vi.fn()
   } as unknown as Creep;
 }
 
-describe("withdrawFromNearestContainer", () => {
-  it("withdraws from the closest container with energy", () => {
+describe("withdrawFromFullestContainer", () => {
+  it("withdraws from the only container with energy", () => {
     const creep = mockWithdrawCreep();
 
-    const acted = withdrawFromNearestContainer(creep);
+    const acted = withdrawFromFullestContainer(creep);
 
     expect(acted).toBe(true);
     expect(creep.withdraw).toHaveBeenCalledWith(
@@ -285,7 +285,7 @@ describe("withdrawFromNearestContainer", () => {
   it("moves toward the target when out of withdraw range", () => {
     const creep = mockWithdrawCreep({ withdrawResult: ERR_NOT_IN_RANGE });
 
-    withdrawFromNearestContainer(creep);
+    withdrawFromFullestContainer(creep);
 
     expect(creep.moveTo).toHaveBeenCalledWith(
       expect.objectContaining({ id: "container1" }),
@@ -301,7 +301,7 @@ describe("withdrawFromNearestContainer", () => {
       ]
     });
 
-    withdrawFromNearestContainer(creep);
+    withdrawFromFullestContainer(creep);
 
     expect(creep.withdraw).toHaveBeenCalledWith(
       expect.objectContaining({ id: "container2" }),
@@ -312,7 +312,7 @@ describe("withdrawFromNearestContainer", () => {
   it("returns false and does not withdraw when no container has energy", () => {
     const creep = mockWithdrawCreep({ containers: [{ id: "container1", usedCapacity: 0 }] });
 
-    const acted = withdrawFromNearestContainer(creep);
+    const acted = withdrawFromFullestContainer(creep);
 
     expect(acted).toBe(false);
     expect(creep.withdraw).not.toHaveBeenCalled();
@@ -326,7 +326,7 @@ describe("withdrawFromNearestContainer", () => {
       ]
     });
 
-    withdrawFromNearestContainer(creep, { id: "container1" } as StructureContainer);
+    withdrawFromFullestContainer(creep, { id: "container1" } as StructureContainer);
 
     expect(creep.withdraw).toHaveBeenCalledWith(
       expect.objectContaining({ id: "container2" }),
@@ -337,9 +337,47 @@ describe("withdrawFromNearestContainer", () => {
   it("returns false and does not withdraw when the only container with energy is excluded", () => {
     const creep = mockWithdrawCreep({ containers: [{ id: "container1", usedCapacity: 50 }] });
 
-    const acted = withdrawFromNearestContainer(creep, { id: "container1" } as StructureContainer);
+    const acted = withdrawFromFullestContainer(creep, { id: "container1" } as StructureContainer);
 
     expect(acted).toBe(false);
     expect(creep.withdraw).not.toHaveBeenCalled();
+  });
+
+  it("prefers the container with more stored energy over a merely closer one", () => {
+    // Regression test: found live on the official server - creeps kept picking whichever
+    // container was closest and never checked back on the other, which filled to
+    // capacity and spilled 4600+ energy onto the ground, decaying, while sitting
+    // completely full and un-serviced.
+    const creep = mockWithdrawCreep({
+      creepPos: { x: 0, y: 0 },
+      containers: [
+        { id: "near", usedCapacity: 100, pos: { x: 1, y: 0 } },
+        { id: "far", usedCapacity: 2000, pos: { x: 40, y: 40 } }
+      ]
+    });
+
+    withdrawFromFullestContainer(creep);
+
+    expect(creep.withdraw).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "far" }),
+      RESOURCE_ENERGY
+    );
+  });
+
+  it("breaks a tie in stored energy by picking the closer container", () => {
+    const creep = mockWithdrawCreep({
+      creepPos: { x: 0, y: 0 },
+      containers: [
+        { id: "far", usedCapacity: 100, pos: { x: 40, y: 40 } },
+        { id: "near", usedCapacity: 100, pos: { x: 1, y: 0 } }
+      ]
+    });
+
+    withdrawFromFullestContainer(creep);
+
+    expect(creep.withdraw).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "near" }),
+      RESOURCE_ENERGY
+    );
   });
 });

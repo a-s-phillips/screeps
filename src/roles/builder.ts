@@ -3,7 +3,7 @@ import {
   decideWorkingState,
   harvestFromNearestSource,
   MOVE_OPTS,
-  withdrawFromNearestContainer
+  withdrawFromFullestContainer
 } from "./shared";
 
 export function run(creep: Creep): void {
@@ -13,7 +13,7 @@ export function run(creep: Creep): void {
   creep.memory.working = working;
 
   if (!working) {
-    if (withdrawFromNearestContainer(creep)) return;
+    if (withdrawFromFullestContainer(creep)) return;
     harvestFromNearestSource(creep);
     return;
   }

@@ -39,15 +39,30 @@ export function deliverEnergy(creep: Creep): boolean {
   return true;
 }
 
-export function withdrawFromNearestContainer(creep: Creep, exclude?: StructureContainer): boolean {
+// Prefers whichever container has the biggest energy backlog over whichever is merely
+// closest, tie-broken by distance. Pure "nearest" lets creeps permanently converge on
+// one container while another sits full and overflows - found live: a source's
+// container hit capacity and stayed there, spilling 4600+ energy onto the ground and
+// decaying, because every hauler kept re-picking the other (nearer, to them) container
+// instead of ever checking back on it.
+export function withdrawFromFullestContainer(creep: Creep, exclude?: StructureContainer): boolean {
   const containers = getCachedFind(creep.room, FIND_STRUCTURES).filter(
     (structure): structure is StructureContainer =>
       structure.structureType === STRUCTURE_CONTAINER &&
       structure.id !== exclude?.id &&
       structure.store.getUsedCapacity(RESOURCE_ENERGY) > 0
   );
-  const target = creep.pos.findClosestByPath(containers);
-  if (!target) return false;
+  if (containers.length === 0) return false;
+
+  const target = containers.reduce((biggest, candidate) => {
+    const biggestEnergy = biggest.store.getUsedCapacity(RESOURCE_ENERGY);
+    const candidateEnergy = candidate.store.getUsedCapacity(RESOURCE_ENERGY);
+    if (candidateEnergy > biggestEnergy) return candidate;
+    if (candidateEnergy < biggestEnergy) return biggest;
+    return chebyshevDistance(creep.pos, candidate.pos) < chebyshevDistance(creep.pos, biggest.pos)
+      ? candidate
+      : biggest;
+  });
 
   if (creep.withdraw(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
     creep.moveTo(target, MOVE_OPTS);
