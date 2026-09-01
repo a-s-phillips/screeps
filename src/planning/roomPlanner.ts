@@ -11,10 +11,16 @@ function buildOccupancy(room: Room): {
 } {
   const terrain = room.getTerrain();
   const occupied = new Set<string>();
+  // Roads don't block other structures in Screeps - they coexist with almost anything,
+  // including on the single walkable tile adjacent to a source. Treating them as
+  // occupied here permanently starved sources of their only viable container tile
+  // whenever roadPlanner's spawn->source pathing landed there first.
   for (const structure of getCachedFind(room, FIND_STRUCTURES)) {
+    if (structure.structureType === STRUCTURE_ROAD) continue;
     occupied.add(`${structure.pos.x},${structure.pos.y}`);
   }
   for (const site of getCachedFind(room, FIND_CONSTRUCTION_SITES)) {
+    if (site.structureType === STRUCTURE_ROAD) continue;
     occupied.add(`${site.pos.x},${site.pos.y}`);
   }
   for (const source of getCachedFind(room, FIND_SOURCES)) {
@@ -85,7 +91,9 @@ function planContainers(room: Room): void {
   ];
 
   for (const anchor of anchors) {
-    const hasNearbyContainer = containerPositions.some((pos) => chebyshevDistance(pos, anchor) <= 1);
+    const hasNearbyContainer = containerPositions.some(
+      (pos) => chebyshevDistance(pos, anchor) <= 1
+    );
     if (hasNearbyContainer) continue;
 
     const site = findContainerSite(isWalkable, isOccupied, anchor);

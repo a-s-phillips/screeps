@@ -12,6 +12,8 @@ function mockRoom(opts: {
   sources?: { x: number; y: number }[];
   existingContainers?: { x: number; y: number }[];
   pendingContainerSites?: { x: number; y: number }[];
+  existingRoads?: { x: number; y: number }[];
+  pendingRoadSites?: { x: number; y: number }[];
   createResult?: ScreepsReturnCode;
   findPathResult?: { x: number; y: number }[];
 }) {
@@ -20,6 +22,8 @@ function mockRoom(opts: {
   const sources = opts.sources ?? [];
   const existingContainers = opts.existingContainers ?? [];
   const pendingContainerSites = opts.pendingContainerSites ?? [];
+  const existingRoads = opts.existingRoads ?? [];
+  const pendingRoadSites = opts.pendingRoadSites ?? [];
   const spawn = { pos: { x: 25, y: 25 } };
 
   const room = {
@@ -30,12 +34,16 @@ function mockRoom(opts: {
         return existingExtensions.map((p) => ({ structureType: STRUCTURE_EXTENSION, pos: p }));
       }
       if (type === FIND_STRUCTURES) {
-        return existingContainers.map((p) => ({ structureType: STRUCTURE_CONTAINER, pos: p }));
+        return [
+          ...existingContainers.map((p) => ({ structureType: STRUCTURE_CONTAINER, pos: p })),
+          ...existingRoads.map((p) => ({ structureType: STRUCTURE_ROAD, pos: p }))
+        ];
       }
       if (type === FIND_MY_CONSTRUCTION_SITES) {
         return [
           ...pendingExtensionSites.map((p) => ({ structureType: STRUCTURE_EXTENSION, pos: p })),
-          ...pendingContainerSites.map((p) => ({ structureType: STRUCTURE_CONTAINER, pos: p }))
+          ...pendingContainerSites.map((p) => ({ structureType: STRUCTURE_CONTAINER, pos: p })),
+          ...pendingRoadSites.map((p) => ({ structureType: STRUCTURE_ROAD, pos: p }))
         ];
       }
       if (type === FIND_CONSTRUCTION_SITES) return [];
@@ -130,6 +138,17 @@ describe("planRoom", () => {
       planRoom(room, { roadPlan: [] });
 
       expect(logger.log).not.toHaveBeenCalled();
+    });
+
+    it("places an extension on a tile that already has a road, since roads don't block other structures", () => {
+      // Real Screeps allows roads to coexist with almost any other structure - this
+      // reproduces the live pserver bug where buildOccupancy treated an existing road
+      // as blocking, permanently starving a source of its only viable container tile.
+      const room = mockRoom({ level: 2, existingRoads: [{ x: 23, y: 23 }] });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(23, 23, STRUCTURE_EXTENSION);
     });
 
     it("does nothing when there is no spawn to anchor on", () => {
@@ -239,6 +258,22 @@ describe("planRoom", () => {
         room.createConstructionSite as ReturnType<typeof vi.fn>
       ).mock.calls.filter(([, , structureType]) => structureType === STRUCTURE_CONTAINER);
       expect(containerCalls).toHaveLength(1);
+    });
+
+    it("places a container on a tile that already has a road, since roads don't block other structures", () => {
+      // Reproduces the live pserver bug: a source's only walkable adjacent tile
+      // already has a road (built by roadPlanner's spawn->source pathing, since
+      // it's the only way in). Roads don't block placement in real Screeps, so a
+      // container should still land there instead of being skipped forever.
+      const room = mockRoom({
+        level: 2,
+        sources: [{ x: 10, y: 10 }],
+        existingRoads: [{ x: 9, y: 9 }]
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(9, 9, STRUCTURE_CONTAINER);
     });
 
     it("skips a source with no free adjacent tile and still covers a later source", () => {
