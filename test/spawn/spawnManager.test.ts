@@ -14,6 +14,9 @@ function baseState(overrides: Partial<RoomState> = {}): RoomState {
     containerCount: 0,
     energyAvailable: 300,
     energyCapacityAvailable: 300,
+    // RCL1, matching upgraderTargetFor's min(controllerLevel + 1, cap) - keeps every
+    // pre-existing test's implicit "upgrader target is 2" assumption intact.
+    controllerLevel: 1,
     ...overrides
   };
 }
@@ -88,6 +91,53 @@ describe("decideNextSpawn", () => {
     const state = baseState({ energyAvailable: 50 });
 
     expect(decideNextSpawn(state)).toBeNull();
+  });
+
+  it("raises the upgrader target as controller level rises", () => {
+    const state = baseState({
+      creepCounts: { harvester: 2, upgrader: 2, builder: 0, hauler: 0, miner: 0 },
+      controllerLevel: 3 // target = min(3 + 1, 4) = 4, so 2 upgraders is still under target
+    });
+
+    expect(decideNextSpawn(state)?.role).toBe("upgrader");
+  });
+
+  it("caps the upgrader target once it's met, even at a high controller level", () => {
+    const state = baseState({
+      creepCounts: { harvester: 2, upgrader: 4, builder: 0, hauler: 0, miner: 0 },
+      controllerLevel: 6 // target = min(6 + 1, 4) = 4 (capped)
+    });
+
+    expect(decideNextSpawn(state)).toBeNull();
+  });
+
+  it("drops the upgrader target to 1 at controller level 8, where upgrade power itself is capped", () => {
+    const state = baseState({
+      creepCounts: { harvester: 2, upgrader: 1, builder: 0, hauler: 0, miner: 0 },
+      controllerLevel: 8
+    });
+
+    expect(decideNextSpawn(state)).toBeNull();
+  });
+
+  it("scales the builder target with construction site count, capped", () => {
+    const met = baseState({
+      creepCounts: { harvester: 2, upgrader: 2, builder: 1, hauler: 0, miner: 0 },
+      constructionSiteCount: 1
+    });
+    expect(decideNextSpawn(met)).toBeNull();
+
+    const underTarget = baseState({
+      creepCounts: { harvester: 2, upgrader: 2, builder: 1, hauler: 0, miner: 0 },
+      constructionSiteCount: 5 // target = min(5, 3) = 3, so 1 builder is still under target
+    });
+    expect(decideNextSpawn(underTarget)?.role).toBe("builder");
+
+    const atCap = baseState({
+      creepCounts: { harvester: 2, upgrader: 2, builder: 3, hauler: 0, miner: 0 },
+      constructionSiteCount: 5 // target capped at 3, already met
+    });
+    expect(decideNextSpawn(atCap)).toBeNull();
   });
 
   it("skips a role for this tick rather than downsizing its body, once a harvester already feeds the spawn", () => {
@@ -207,7 +257,12 @@ describe("runSpawning", () => {
   const sourcePos = { x: 10, y: 10 };
 
   function mockRoom(
-    opts: { containers?: number; containerAtSource?: boolean; energyAvailable?: number } = {}
+    opts: {
+      containers?: number;
+      containerAtSource?: boolean;
+      energyAvailable?: number;
+      controllerLevel?: number;
+    } = {}
   ) {
     // Containers default far from the source so pre-existing tests (which only care
     // about containerCount, not source adjacency) don't accidentally trigger a miner
@@ -222,6 +277,7 @@ describe("runSpawning", () => {
       name: "W1N1",
       energyAvailable: opts.energyAvailable ?? 300,
       energyCapacityAvailable: 300,
+      controller: { level: opts.controllerLevel ?? 1 },
       find: vi.fn((type: FindConstant) => {
         if (type === FIND_SOURCES_ACTIVE) return [{ id: "source1", pos: sourcePos }];
         if (type === FIND_CONSTRUCTION_SITES) return [];
@@ -409,6 +465,28 @@ describe("runSpawning", () => {
     runSpawning(spawn, mockRoom({ containers: 1, containerAtSource: true }));
 
     expect(spawn.recycleCreep).not.toHaveBeenCalled();
+  });
+
+  it("wires the room's actual controller level into the upgrader target", () => {
+    vi.stubGlobal("Game", {
+      time: 12345,
+      creeps: {
+        h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        u1: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } },
+        u2: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } }
+      }
+    });
+    const spawn = mockSpawn(false);
+
+    // At the default controllerLevel (1) the upgrader target is already met (2/2) and
+    // nothing spawns - see "does not spawn when no role is under target" above. A room
+    // that's actually reached RCL3 should raise that target to 4 and want a 3rd upgrader.
+    runSpawning(spawn, mockRoom({ controllerLevel: 3 }));
+
+    expect(spawn.spawnCreep).toHaveBeenCalledWith(expect.any(Array), "upgrader_12345", {
+      memory: { role: "upgrader", working: false }
+    });
   });
 
   it("does not recycle harvesters when the count is at or below target", () => {

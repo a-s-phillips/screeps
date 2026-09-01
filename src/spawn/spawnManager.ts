@@ -11,6 +11,7 @@ export interface RoomState {
   containerCount: number;
   energyAvailable: number;
   energyCapacityAvailable: number;
+  controllerLevel: number;
 }
 
 interface SpawnDecision {
@@ -24,6 +25,25 @@ interface SpawnDecision {
 // don't have one yet.
 function harvesterTargetFor(state: RoomState): number {
   return state.sourcesWithoutContainerCount * 2;
+}
+
+const UPGRADER_TARGET_CAP = 4;
+// CONTROLLER_MAX_UPGRADE_PER_TICK caps total useful controller upgrade power at 15
+// energy/tick once the room hits RCL8 - a single capacity-sized upgrader body already
+// meets or exceeds that alone, so more upgraders past that point are wasted spawns.
+const CONTROLLER_UPGRADE_POWER_CAP_LEVEL = 8;
+
+function upgraderTargetFor(state: RoomState): number {
+  if (state.controllerLevel >= CONTROLLER_UPGRADE_POWER_CAP_LEVEL) return 1;
+  return Math.min(state.controllerLevel + 1, UPGRADER_TARGET_CAP);
+}
+
+// Scales with actual queue depth instead of a flat "any sites? then 2" gate, capped so
+// builders don't crowd out other roles' share of energy once the queue runs long.
+const BUILDER_TARGET_CAP = 3;
+
+function builderTargetFor(state: RoomState): number {
+  return Math.min(state.constructionSiteCount, BUILDER_TARGET_CAP);
 }
 
 export function decideNextSpawn(state: RoomState): SpawnDecision | null {
@@ -57,10 +77,14 @@ export function decideNextSpawn(state: RoomState): SpawnDecision | null {
       sizingCapacity: bootstrapSizingCapacity
     },
     { role: "hauler", target: state.containerCount, sizingCapacity: bootstrapSizingCapacity },
-    { role: "upgrader", target: 2, sizingCapacity: state.energyCapacityAvailable },
+    {
+      role: "upgrader",
+      target: upgraderTargetFor(state),
+      sizingCapacity: state.energyCapacityAvailable
+    },
     {
       role: "builder",
-      target: state.constructionSiteCount > 0 ? 2 : 0,
+      target: builderTargetFor(state),
       sizingCapacity: state.energyCapacityAvailable
     }
   ];
@@ -139,7 +163,8 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     constructionSiteCount: getCachedFind(room, FIND_CONSTRUCTION_SITES).length,
     containerCount: containers.length,
     energyAvailable: room.energyAvailable,
-    energyCapacityAvailable: room.energyCapacityAvailable
+    energyCapacityAvailable: room.energyCapacityAvailable,
+    controllerLevel: room.controller?.level ?? 0
   };
 
   const excessHarvesters = creepCounts.harvester - harvesterTargetFor(state);
