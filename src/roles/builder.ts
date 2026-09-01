@@ -1,11 +1,5 @@
 import { getCachedFind } from "../utils/roomCache";
-import {
-  decideWorkingState,
-  findAdjacentActiveSource,
-  harvestFromNearestSource,
-  MOVE_OPTS,
-  withdrawFromFullestContainer
-} from "./shared";
+import { decideWorkingState, gatherEnergy, MOVE_OPTS } from "./shared";
 
 export function run(creep: Creep): void {
   const isEmpty = creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0;
@@ -14,17 +8,7 @@ export function run(creep: Creep): void {
   creep.memory.working = working;
 
   if (!working) {
-    // An active source right next to the creep (e.g. building that source's own
-    // container) is zero-travel and otherwise-uncollected income - worth harvesting
-    // directly even if some other container elsewhere has more energy sitting in it.
-    const adjacentSource = findAdjacentActiveSource(creep);
-    if (adjacentSource) {
-      creep.harvest(adjacentSource);
-      return;
-    }
-
-    if (withdrawFromFullestContainer(creep)) return;
-    harvestFromNearestSource(creep);
+    gatherEnergy(creep);
     return;
   }
 

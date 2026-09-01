@@ -3,7 +3,10 @@ import { run } from "../../src/roles/upgrader";
 import { MOVE_OPTS } from "../../src/roles/shared";
 import { resetRoomCache } from "../../src/utils/roomCache";
 
-const source = { id: "source1" };
+// Far from the default creep pos (0,0) - keeps the default scenario "no active source
+// closer than a container", so existing tests still exercise the withdraw/harvest
+// fallback path unless a test deliberately overrides positions.
+const source = { id: "source1", pos: { x: 20, y: 20 } };
 const controller = { id: "controller1" };
 
 function mockCreep(opts: {
@@ -11,9 +14,13 @@ function mockCreep(opts: {
   usedEnergy: number;
   freeCapacity: number;
   upgradeResult?: ScreepsReturnCode;
-  containers?: { id: string; usedCapacity: number }[];
+  containers?: { id: string; usedCapacity: number; pos?: { x: number; y: number } }[];
+  sources?: unknown[];
+  pos?: { x: number; y: number };
 }) {
   const containers = opts.containers ?? [];
+  const sources = opts.sources ?? [source];
+  const pos = opts.pos ?? { x: 0, y: 0 };
 
   const room = {
     name: "W1N1",
@@ -23,10 +30,13 @@ function mockCreep(opts: {
         return containers.map((c) => ({
           id: c.id,
           structureType: STRUCTURE_CONTAINER,
+          // Close to the default creep pos (0,0) - keeps the default scenario
+          // "container is closer than the far-off default source" unless overridden.
+          pos: c.pos ?? { x: 1, y: 0 },
           store: { getUsedCapacity: () => c.usedCapacity }
         }));
       }
-      if (type === FIND_SOURCES_ACTIVE) return [source];
+      if (type === FIND_SOURCES_ACTIVE) return sources;
       return [];
     })
   };
@@ -34,7 +44,7 @@ function mockCreep(opts: {
   return {
     memory: { role: "upgrader", working: opts.working },
     room,
-    pos: { findClosestByPath: vi.fn((targets: unknown[]) => targets[0] ?? null) },
+    pos: { ...pos, findClosestByPath: vi.fn((targets: unknown[]) => targets[0] ?? null) },
     store: {
       getUsedCapacity: vi.fn().mockReturnValue(opts.usedEnergy),
       getFreeCapacity: vi.fn().mockReturnValue(opts.freeCapacity)
@@ -98,5 +108,40 @@ describe("upgrader role", () => {
     run(creep);
 
     expect(creep.moveTo).toHaveBeenCalledWith(controller, MOVE_OPTS);
+  });
+
+  it("harvests a source that's closer than the fullest container", () => {
+    const nearbySource = { id: "source1", pos: { x: 1, y: 0 } };
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 0,
+      freeCapacity: 50,
+      sources: [nearbySource],
+      containers: [{ id: "container1", usedCapacity: 50, pos: { x: 10, y: 0 } }]
+    });
+
+    run(creep);
+
+    expect(creep.harvest).toHaveBeenCalledWith(nearbySource);
+    expect(creep.withdraw).not.toHaveBeenCalled();
+  });
+
+  it("withdraws from a container that's closer than the nearest active source", () => {
+    const farSource = { id: "source1", pos: { x: 10, y: 0 } };
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 0,
+      freeCapacity: 50,
+      sources: [farSource],
+      containers: [{ id: "container1", usedCapacity: 50, pos: { x: 1, y: 0 } }]
+    });
+
+    run(creep);
+
+    expect(creep.withdraw).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "container1" }),
+      RESOURCE_ENERGY
+    );
+    expect(creep.harvest).not.toHaveBeenCalled();
   });
 });

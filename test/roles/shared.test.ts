@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   decideWorkingState,
   deliverEnergy,
-  findAdjacentActiveSource,
   findAdjacentContainerWithCapacity,
   findContainerAtSource,
+  gatherEnergy,
   harvestFromNearestSource,
   MOVE_OPTS,
   withdrawFromFullestContainer
@@ -248,29 +248,136 @@ describe("findAdjacentContainerWithCapacity", () => {
   });
 });
 
-function mockActiveSourceCreep(pos: { x: number; y: number }, sources: { x: number; y: number }[]) {
+function mockGatherCreep(opts: {
+  pos: { x: number; y: number };
+  sources?: { id: string; pos: { x: number; y: number } }[];
+  containers?: { id: string; pos: { x: number; y: number }; usedCapacity: number }[];
+  harvestResult?: ScreepsReturnCode;
+  withdrawResult?: ScreepsReturnCode;
+}) {
+  const sources = opts.sources ?? [];
+  const containers = opts.containers ?? [];
+
   return {
     room: {
       name: "W1N1",
-      find: vi.fn().mockReturnValue(sources.map((sourcePos) => ({ pos: sourcePos })))
+      find: vi.fn((type: FindConstant) => {
+        if (type === FIND_SOURCES_ACTIVE) return sources;
+        if (type === FIND_STRUCTURES) {
+          return containers.map((c) => ({
+            id: c.id,
+            structureType: STRUCTURE_CONTAINER,
+            pos: c.pos,
+            store: { getUsedCapacity: () => c.usedCapacity }
+          }));
+        }
+        return [];
+      })
     },
-    pos
+    pos: {
+      ...opts.pos,
+      findClosestByPath: vi.fn((targets: unknown[]) => targets[0] ?? null)
+    },
+    harvest: vi.fn().mockReturnValue(opts.harvestResult ?? OK),
+    withdraw: vi.fn().mockReturnValue(opts.withdrawResult ?? OK),
+    moveTo: vi.fn()
   } as unknown as Creep;
 }
 
-describe("findAdjacentActiveSource", () => {
-  it("returns an active source within range 1", () => {
-    const creep = mockActiveSourceCreep({ x: 10, y: 10 }, [{ x: 11, y: 10 }]);
+describe("gatherEnergy", () => {
+  it("harvests the nearest source when no container exists", () => {
+    const creep = mockGatherCreep({
+      pos: { x: 10, y: 10 },
+      sources: [{ id: "s1", pos: { x: 11, y: 10 } }]
+    });
 
-    const result = findAdjacentActiveSource(creep);
+    gatherEnergy(creep);
 
-    expect(result).toEqual(expect.objectContaining({ pos: { x: 11, y: 10 } }));
+    expect(creep.harvest).toHaveBeenCalledWith(expect.objectContaining({ id: "s1" }));
+    expect(creep.withdraw).not.toHaveBeenCalled();
   });
 
-  it("returns undefined when no active source is within range 1", () => {
-    const creep = mockActiveSourceCreep({ x: 10, y: 10 }, [{ x: 12, y: 10 }]);
+  it("withdraws from the fullest container when no active source exists", () => {
+    const creep = mockGatherCreep({
+      pos: { x: 10, y: 10 },
+      containers: [{ id: "c1", pos: { x: 11, y: 10 }, usedCapacity: 50 }]
+    });
 
-    expect(findAdjacentActiveSource(creep)).toBeUndefined();
+    gatherEnergy(creep);
+
+    expect(creep.withdraw).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "c1" }),
+      RESOURCE_ENERGY
+    );
+    expect(creep.harvest).not.toHaveBeenCalled();
+  });
+
+  it("prefers the source when it's closer than the fullest container", () => {
+    const creep = mockGatherCreep({
+      pos: { x: 0, y: 0 },
+      sources: [{ id: "s1", pos: { x: 1, y: 0 } }],
+      containers: [{ id: "c1", pos: { x: 10, y: 0 }, usedCapacity: 50 }]
+    });
+
+    gatherEnergy(creep);
+
+    expect(creep.harvest).toHaveBeenCalledWith(expect.objectContaining({ id: "s1" }));
+    expect(creep.withdraw).not.toHaveBeenCalled();
+  });
+
+  it("prefers the fullest container when it's closer than the nearest source", () => {
+    // The scenario a fixed "adjacent" range check couldn't capture: build/upgrade/repair
+    // have range 3 while harvest has range 1, so a creep parked to build near a source
+    // can easily be closer to a container than to that source. Found live: a builder
+    // parked at range 3 from a container construction site sat at range 4 from the
+    // source it was built for.
+    const creep = mockGatherCreep({
+      pos: { x: 0, y: 0 },
+      sources: [{ id: "s1", pos: { x: 10, y: 0 } }],
+      containers: [{ id: "c1", pos: { x: 1, y: 0 }, usedCapacity: 50 }]
+    });
+
+    gatherEnergy(creep);
+
+    expect(creep.withdraw).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "c1" }),
+      RESOURCE_ENERGY
+    );
+    expect(creep.harvest).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when neither a source nor a container exists", () => {
+    const creep = mockGatherCreep({ pos: { x: 0, y: 0 } });
+
+    gatherEnergy(creep);
+
+    expect(creep.harvest).not.toHaveBeenCalled();
+    expect(creep.withdraw).not.toHaveBeenCalled();
+    expect(creep.moveTo).not.toHaveBeenCalled();
+  });
+
+  it("moves toward the source when out of harvest range", () => {
+    const creep = mockGatherCreep({
+      pos: { x: 0, y: 0 },
+      sources: [{ id: "s1", pos: { x: 1, y: 0 } }],
+      harvestResult: ERR_NOT_IN_RANGE
+    });
+
+    gatherEnergy(creep);
+
+    expect(creep.moveTo).toHaveBeenCalledWith(expect.objectContaining({ id: "s1" }), MOVE_OPTS);
+  });
+
+  it("moves toward the container when out of withdraw range", () => {
+    const creep = mockGatherCreep({
+      pos: { x: 0, y: 0 },
+      containers: [{ id: "c1", pos: { x: 1, y: 0 }, usedCapacity: 50 }],
+      withdrawResult: ERR_NOT_IN_RANGE
+    });
+
+    gatherEnergy(creep);
+
+    expect(creep.moveTo).toHaveBeenCalledWith(expect.objectContaining({ id: "c1" }), MOVE_OPTS);
   });
 });
 

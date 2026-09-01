@@ -1,9 +1,4 @@
-import {
-  decideWorkingState,
-  harvestFromNearestSource,
-  MOVE_OPTS,
-  withdrawFromFullestContainer
-} from "./shared";
+import { decideWorkingState, gatherEnergy, MOVE_OPTS } from "./shared";
 
 export function run(creep: Creep): void {
   const isEmpty = creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0;
@@ -12,8 +7,7 @@ export function run(creep: Creep): void {
   creep.memory.working = working;
 
   if (!working) {
-    if (withdrawFromFullestContainer(creep)) return;
-    harvestFromNearestSource(creep);
+    gatherEnergy(creep);
     return;
   }
 

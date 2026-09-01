@@ -15,7 +15,7 @@ function mockCreep(opts: {
   usedEnergy: number;
   freeCapacity: number;
   sites?: unknown[];
-  containers?: { id: string; usedCapacity: number }[];
+  containers?: { id: string; usedCapacity: number; pos?: { x: number; y: number } }[];
   sources?: unknown[];
   pos?: { x: number; y: number };
   buildResult?: ScreepsReturnCode;
@@ -35,6 +35,9 @@ function mockCreep(opts: {
         return containers.map((c) => ({
           id: c.id,
           structureType: STRUCTURE_CONTAINER,
+          // Close to the default creep pos (0,0) - keeps the default scenario "container
+          // is closer than the far-off default source" unless a test overrides it.
+          pos: c.pos ?? { x: 1, y: 0 },
           store: { getUsedCapacity: () => c.usedCapacity }
         }));
       }

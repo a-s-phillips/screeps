@@ -13,9 +13,13 @@ export function decideWorkingState(
   return currentlyWorking;
 }
 
-export function harvestFromNearestSource(creep: Creep): void {
+function findNearestActiveSource(creep: Creep): Source | undefined {
   const sources = getCachedFind(creep.room, FIND_SOURCES_ACTIVE);
-  const target = creep.pos.findClosestByPath(sources);
+  return creep.pos.findClosestByPath(sources) ?? undefined;
+}
+
+export function harvestFromNearestSource(creep: Creep): void {
+  const target = findNearestActiveSource(creep);
   if (!target) return;
 
   if (creep.harvest(target) === ERR_NOT_IN_RANGE) {
@@ -51,16 +55,19 @@ export function deliverEnergy(creep: Creep): boolean {
 // container hit capacity and stayed there, spilling 4600+ energy onto the ground and
 // decaying, because every hauler kept re-picking the other (nearer, to them) container
 // instead of ever checking back on it.
-export function withdrawFromFullestContainer(creep: Creep, exclude?: StructureContainer): boolean {
+function findFullestContainer(
+  creep: Creep,
+  exclude?: StructureContainer
+): StructureContainer | undefined {
   const containers = getCachedFind(creep.room, FIND_STRUCTURES).filter(
     (structure): structure is StructureContainer =>
       structure.structureType === STRUCTURE_CONTAINER &&
       structure.id !== exclude?.id &&
       structure.store.getUsedCapacity(RESOURCE_ENERGY) > 0
   );
-  if (containers.length === 0) return false;
+  if (containers.length === 0) return undefined;
 
-  const target = containers.reduce((biggest, candidate) => {
+  return containers.reduce((biggest, candidate) => {
     const biggestEnergy = biggest.store.getUsedCapacity(RESOURCE_ENERGY);
     const candidateEnergy = candidate.store.getUsedCapacity(RESOURCE_ENERGY);
     if (candidateEnergy > biggestEnergy) return candidate;
@@ -69,6 +76,11 @@ export function withdrawFromFullestContainer(creep: Creep, exclude?: StructureCo
       ? candidate
       : biggest;
   });
+}
+
+export function withdrawFromFullestContainer(creep: Creep, exclude?: StructureContainer): boolean {
+  const target = findFullestContainer(creep, exclude);
+  if (!target) return false;
 
   if (creep.withdraw(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
     creep.moveTo(target, MOVE_OPTS);
@@ -76,9 +88,36 @@ export function withdrawFromFullestContainer(creep: Creep, exclude?: StructureCo
   return true;
 }
 
-export function findAdjacentActiveSource(creep: Creep): Source | undefined {
-  const sources = getCachedFind(creep.room, FIND_SOURCES_ACTIVE);
-  return sources.find((source) => chebyshevDistance(creep.pos, source.pos) <= 1);
+// Picks whichever is genuinely closer to the creep right now - the nearest active
+// source, or the fullest container - rather than always trying containers first. A
+// fixed "adjacent" range can't capture this correctly: build/upgrade/repair have range
+// 3 while harvest has range 1, so a creep parked to build or upgrade near a source can
+// easily sit outside strict source-adjacency while still being much closer to that
+// source than to any container across the room. Found live: a builder parked at range 3
+// from a container construction site sat at range 4 from the source it was built for -
+// a fixed range-1 "adjacent" check never triggered there, even though the source was
+// obviously the better pick over trekking to a container on the other side of the base.
+export function gatherEnergy(creep: Creep): void {
+  const nearestSource = findNearestActiveSource(creep);
+  const fullestContainer = findFullestContainer(creep);
+
+  const sourceDistance = nearestSource ? chebyshevDistance(creep.pos, nearestSource.pos) : Infinity;
+  const containerDistance = fullestContainer
+    ? chebyshevDistance(creep.pos, fullestContainer.pos)
+    : Infinity;
+
+  if (nearestSource && sourceDistance <= containerDistance) {
+    if (creep.harvest(nearestSource) === ERR_NOT_IN_RANGE) {
+      creep.moveTo(nearestSource, MOVE_OPTS);
+    }
+    return;
+  }
+
+  if (fullestContainer) {
+    if (creep.withdraw(fullestContainer, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+      creep.moveTo(fullestContainer, MOVE_OPTS);
+    }
+  }
 }
 
 export function findAdjacentContainerWithCapacity(creep: Creep): StructureContainer | undefined {
