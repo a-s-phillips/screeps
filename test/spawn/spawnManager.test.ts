@@ -255,6 +255,7 @@ describe("runSpawning", () => {
   });
 
   const sourcePos = { x: 10, y: 10 };
+  const controllerPos = { x: 25, y: 25 };
 
   function mockRoom(
     opts: {
@@ -277,7 +278,7 @@ describe("runSpawning", () => {
       name: "W1N1",
       energyAvailable: opts.energyAvailable ?? 300,
       energyCapacityAvailable: 300,
-      controller: { level: opts.controllerLevel ?? 1 },
+      controller: { level: opts.controllerLevel ?? 1, pos: controllerPos },
       find: vi.fn((type: FindConstant) => {
         if (type === FIND_SOURCES_ACTIVE) return [{ id: "source1", pos: sourcePos }];
         if (type === FIND_CONSTRUCTION_SITES) return [];
@@ -535,6 +536,55 @@ describe("runSpawning", () => {
     expect(spawn.spawnCreep).toHaveBeenCalledWith(expect.any(Array), "upgrader_12345", {
       memory: { role: "upgrader", working: false }
     });
+  });
+
+  it("pre-spawns a replacement upgrader once one is nearing death", () => {
+    // energyCapacityAvailable 300 -> planBody("upgrader", 300) gives [WORK, CARRY, MOVE]
+    // (length 3). Spawn at (0,0), controller at (25,25) (chebyshev 25) -> lead time =
+    // 3 * CREEP_SPAWN_TIME + 25 = 34. A ticksToLive of 20 is under that, so the dying
+    // upgrader shouldn't count toward the RCL1 target of 2 - leaving room for a 3rd.
+    vi.stubGlobal("Game", {
+      time: 12345,
+      creeps: {
+        h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        u1: {
+          room: { name: "W1N1" },
+          memory: { role: "upgrader", working: false },
+          ticksToLive: 20
+        },
+        u2: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } }
+      }
+    });
+    const spawn = mockSpawn(false);
+
+    runSpawning(spawn, mockRoom());
+
+    expect(spawn.spawnCreep).toHaveBeenCalledWith(expect.any(Array), "upgrader_12345", {
+      memory: { role: "upgrader", working: false }
+    });
+  });
+
+  it("does not pre-spawn an upgrader replacement while ticksToLive is comfortably above the lead time", () => {
+    // Same setup (lead time 34), but ticksToLive 100 is well above it.
+    vi.stubGlobal("Game", {
+      time: 12345,
+      creeps: {
+        h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        u1: {
+          room: { name: "W1N1" },
+          memory: { role: "upgrader", working: false },
+          ticksToLive: 100
+        },
+        u2: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } }
+      }
+    });
+    const spawn = mockSpawn(false);
+
+    runSpawning(spawn, mockRoom());
+
+    expect(spawn.spawnCreep).not.toHaveBeenCalled();
   });
 
   it("does not recycle harvesters when the count is at or below target", () => {

@@ -141,11 +141,28 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
   // treat that as healthy since it can't need a replacement before it even exists.
   const minerTicksToLiveBySource = new Map<Id<Source>, number>();
 
+  // Upgraders are fungible (unlike miners, any one can replace any other), so a dying
+  // upgrader just needs to stop counting toward the target early - decideNextSpawn's
+  // usual "under target" check takes care of the rest. Working upgraders always head
+  // straight for the controller (see upgrader.ts), a fixed position, so - same as the
+  // miner case - the lead time is precise and can be computed once up front.
+  const upgraderLeadTime = room.controller
+    ? replacementLeadTime(
+        planBody("upgrader", room.energyCapacityAvailable).length,
+        chebyshevDistance(spawn.pos, room.controller.pos)
+      )
+    : 0;
+
   for (const name in Game.creeps) {
     const creep = Game.creeps[name];
     if (creep.room.name !== room.name) continue;
 
-    creepCounts[creep.memory.role]++;
+    if (creep.memory.role === "upgrader" && isNearingDeath(creep.ticksToLive, upgraderLeadTime)) {
+      // Nearing death - treat as already gone rather than counting it toward the target.
+    } else {
+      creepCounts[creep.memory.role]++;
+    }
+
     if (creep.memory.role === "harvester") harvesterCreeps.push(creep);
     if (creep.memory.role === "miner" && creep.memory.sourceId) {
       const ticksToLive = creep.ticksToLive ?? Infinity;
