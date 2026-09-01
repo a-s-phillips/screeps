@@ -114,4 +114,38 @@ describe("builder role", () => {
     expect(creep.build).not.toHaveBeenCalled();
     expect(creep.upgradeController).toHaveBeenCalledWith(controller);
   });
+
+  it("prioritizes a container construction site over other site types, regardless of order", () => {
+    // A container unlocks a miner (a real economy upgrade) - worth building even if it's
+    // farther away than an extension/road, which "closest site" targeting alone would
+    // never guarantee (found live: a source's container sat at 0 progress indefinitely
+    // while builders kept converging on closer, ever-replenishing extensions/roads).
+    const otherSite = { id: "site1", structureType: STRUCTURE_EXTENSION };
+    const containerSite = { id: "site2", structureType: STRUCTURE_CONTAINER };
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 50,
+      freeCapacity: 0,
+      sites: [otherSite, containerSite]
+    });
+
+    run(creep);
+
+    expect(creep.build).toHaveBeenCalledWith(containerSite);
+  });
+
+  it("falls back to the closest site of any type when there are no container sites", () => {
+    const siteA = { id: "site1", structureType: STRUCTURE_EXTENSION };
+    const siteB = { id: "site2", structureType: STRUCTURE_ROAD };
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 50,
+      freeCapacity: 0,
+      sites: [siteA, siteB]
+    });
+
+    run(creep);
+
+    expect(creep.build).toHaveBeenCalledWith(siteA);
+  });
 });

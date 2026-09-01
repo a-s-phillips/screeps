@@ -19,7 +19,14 @@ export function run(creep: Creep): void {
   }
 
   const sites = getCachedFind(creep.room, FIND_CONSTRUCTION_SITES);
-  const site = creep.pos.findClosestByPath(sites);
+  // Containers unlock a miner - a real economy upgrade - so they're worth building even
+  // if farther away than an extension/road, which closest-site targeting alone can't
+  // guarantee: found live, a source's container sat at 0 progress indefinitely while
+  // builders kept converging on closer, ever-replenishing extensions/roads instead.
+  const containerSites = sites.filter(
+    (candidate) => candidate.structureType === STRUCTURE_CONTAINER
+  );
+  const site = creep.pos.findClosestByPath(containerSites) ?? creep.pos.findClosestByPath(sites);
   if (site) {
     if (creep.build(site) === ERR_NOT_IN_RANGE) {
       creep.moveTo(site, MOVE_OPTS);
