@@ -11,11 +11,24 @@ function mockCreep(opts: {
   usedEnergy: number;
   freeCapacity: number;
   upgradeResult?: ScreepsReturnCode;
+  containers?: { id: string; usedCapacity: number }[];
 }) {
+  const containers = opts.containers ?? [];
+
   const room = {
     name: "W1N1",
     controller,
-    find: vi.fn().mockReturnValue([source])
+    find: vi.fn((type: FindConstant) => {
+      if (type === FIND_STRUCTURES) {
+        return containers.map((c) => ({
+          id: c.id,
+          structureType: STRUCTURE_CONTAINER,
+          store: { getUsedCapacity: () => c.usedCapacity }
+        }));
+      }
+      if (type === FIND_SOURCES_ACTIVE) return [source];
+      return [];
+    })
   };
 
   return {
@@ -27,6 +40,7 @@ function mockCreep(opts: {
       getFreeCapacity: vi.fn().mockReturnValue(opts.freeCapacity)
     },
     harvest: vi.fn().mockReturnValue(OK),
+    withdraw: vi.fn().mockReturnValue(OK),
     moveTo: vi.fn(),
     upgradeController: vi.fn().mockReturnValue(opts.upgradeResult ?? OK)
   } as unknown as Creep;
@@ -37,13 +51,31 @@ describe("upgrader role", () => {
     resetRoomCache();
   });
 
-  it("harvests when empty", () => {
+  it("harvests when empty and no container has energy", () => {
     const creep = mockCreep({ working: true, usedEnergy: 0, freeCapacity: 50 });
 
     run(creep);
 
     expect(creep.memory.working).toBe(false);
     expect(creep.harvest).toHaveBeenCalledWith(source);
+  });
+
+  it("withdraws from a container instead of harvesting when one has energy", () => {
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 0,
+      freeCapacity: 50,
+      containers: [{ id: "container1", usedCapacity: 50 }]
+    });
+
+    run(creep);
+
+    expect(creep.memory.working).toBe(false);
+    expect(creep.withdraw).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "container1" }),
+      RESOURCE_ENERGY
+    );
+    expect(creep.harvest).not.toHaveBeenCalled();
   });
 
   it("upgrades the controller when full", () => {

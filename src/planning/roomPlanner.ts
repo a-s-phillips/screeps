@@ -3,6 +3,7 @@ import { chebyshevDistance, Point } from "../utils/grid";
 import { getCachedFind } from "../utils/roomCache";
 import { findContainerSite } from "./containerPlanner";
 import { findExtensionSite } from "./extensionPlanner";
+import { planRoads } from "./roadPlanner";
 
 function buildOccupancy(room: Room): {
   isWalkable: (x: number, y: number) => boolean;
@@ -78,13 +79,16 @@ function planContainers(room: Room): void {
     (c) => c.pos
   );
 
-  for (const source of getCachedFind(room, FIND_SOURCES)) {
-    const hasNearbyContainer = containerPositions.some(
-      (pos) => chebyshevDistance(pos, source.pos) <= 1
-    );
+  const anchors: Point[] = [
+    ...getCachedFind(room, FIND_SOURCES).map((source) => ({ x: source.pos.x, y: source.pos.y })),
+    { x: room.controller.pos.x, y: room.controller.pos.y }
+  ];
+
+  for (const anchor of anchors) {
+    const hasNearbyContainer = containerPositions.some((pos) => chebyshevDistance(pos, anchor) <= 1);
     if (hasNearbyContainer) continue;
 
-    const site = findContainerSite(isWalkable, isOccupied, { x: source.pos.x, y: source.pos.y });
+    const site = findContainerSite(isWalkable, isOccupied, anchor);
     if (!site) continue;
 
     const result = room.createConstructionSite(site.x, site.y, STRUCTURE_CONTAINER);
@@ -100,7 +104,8 @@ function planContainers(room: Room): void {
   }
 }
 
-export function planRoom(room: Room): void {
+export function planRoom(room: Room, memory: RoomMemory): void {
   planExtensions(room);
   planContainers(room);
+  planRoads(room, memory);
 }

@@ -51,7 +51,7 @@ export function loop(): void {
       const levelUp = checkLevelUp(room, Memory.rooms[roomName]);
       if (levelUp) log("level_up", levelUp);
 
-      planRoom(room);
+      planRoom(room, Memory.rooms[roomName]);
     }
 
     log("tick_summary", {

@@ -1,4 +1,9 @@
-import { decideWorkingState, harvestFromNearestSource, MOVE_OPTS } from "./shared";
+import {
+  decideWorkingState,
+  harvestFromNearestSource,
+  MOVE_OPTS,
+  withdrawFromNearestContainer
+} from "./shared";
 
 export function run(creep: Creep): void {
   const isEmpty = creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0;
@@ -7,6 +12,7 @@ export function run(creep: Creep): void {
   creep.memory.working = working;
 
   if (!working) {
+    if (withdrawFromNearestContainer(creep)) return;
     harvestFromNearestSource(creep);
     return;
   }

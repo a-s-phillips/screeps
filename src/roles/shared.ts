@@ -39,6 +39,21 @@ export function deliverEnergy(creep: Creep): boolean {
   return true;
 }
 
+export function withdrawFromNearestContainer(creep: Creep): boolean {
+  const containers = getCachedFind(creep.room, FIND_STRUCTURES).filter(
+    (structure): structure is StructureContainer =>
+      structure.structureType === STRUCTURE_CONTAINER &&
+      structure.store.getUsedCapacity(RESOURCE_ENERGY) > 0
+  );
+  const target = creep.pos.findClosestByPath(containers);
+  if (!target) return false;
+
+  if (creep.withdraw(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+    creep.moveTo(target, MOVE_OPTS);
+  }
+  return true;
+}
+
 export function findAdjacentContainerWithCapacity(creep: Creep): StructureContainer | undefined {
   const containers = getCachedFind(creep.room, FIND_STRUCTURES).filter(
     (structure): structure is StructureContainer =>

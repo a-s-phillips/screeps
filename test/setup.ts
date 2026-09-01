@@ -31,6 +31,7 @@ Object.assign(globalThis, {
   STRUCTURE_EXTENSION: "extension",
   STRUCTURE_CONTAINER: "container",
   STRUCTURE_SPAWN: "spawn",
+  STRUCTURE_ROAD: "road",
   TERRAIN_MASK_WALL: 1,
   TERRAIN_MASK_SWAMP: 2,
 

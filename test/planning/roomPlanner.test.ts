@@ -13,6 +13,7 @@ function mockRoom(opts: {
   existingContainers?: { x: number; y: number }[];
   pendingContainerSites?: { x: number; y: number }[];
   createResult?: ScreepsReturnCode;
+  findPathResult?: { x: number; y: number }[];
 }) {
   const existingExtensions = opts.existingExtensions ?? [];
   const pendingExtensionSites = opts.pendingExtensionSites ?? [];
@@ -43,7 +44,8 @@ function mockRoom(opts: {
       return [];
     }),
     getTerrain: vi.fn(() => ({ get: () => 0 })),
-    createConstructionSite: vi.fn().mockReturnValue(opts.createResult ?? OK)
+    createConstructionSite: vi.fn().mockReturnValue(opts.createResult ?? OK),
+    findPath: vi.fn().mockReturnValue(opts.findPathResult ?? [])
   };
 
   return room as unknown as Room;
@@ -58,7 +60,7 @@ describe("planRoom", () => {
   it("does nothing when the room has no controller", () => {
     const room = { name: "W1N1", controller: undefined, find: vi.fn() } as unknown as Room;
 
-    planRoom(room);
+    planRoom(room, {});
 
     expect((room as unknown as { find: ReturnType<typeof vi.fn> }).find).not.toHaveBeenCalled();
   });
@@ -76,7 +78,7 @@ describe("planRoom", () => {
         ]
       });
 
-      planRoom(room);
+      planRoom(room, { roadPlan: [] });
 
       expect(room.createConstructionSite).not.toHaveBeenCalledWith(
         expect.any(Number),
@@ -97,7 +99,7 @@ describe("planRoom", () => {
         ]
       });
 
-      planRoom(room);
+      planRoom(room, { roadPlan: [] });
 
       expect(room.createConstructionSite).not.toHaveBeenCalledWith(
         expect.any(Number),
@@ -109,7 +111,7 @@ describe("planRoom", () => {
     it("places a new extension site and logs it when under the cap", () => {
       const room = mockRoom({ level: 2 });
 
-      planRoom(room);
+      planRoom(room, { roadPlan: [] });
 
       expect(room.createConstructionSite).toHaveBeenCalledWith(
         expect.any(Number),
@@ -125,7 +127,7 @@ describe("planRoom", () => {
     it("does not log when createConstructionSite fails", () => {
       const room = mockRoom({ level: 2, createResult: ERR_NOT_ENOUGH_ENERGY });
 
-      planRoom(room);
+      planRoom(room, { roadPlan: [] });
 
       expect(logger.log).not.toHaveBeenCalled();
     });
@@ -137,7 +139,7 @@ describe("planRoom", () => {
         return [];
       });
 
-      planRoom(room);
+      planRoom(room, { roadPlan: [] });
 
       expect(room.createConstructionSite).not.toHaveBeenCalledWith(
         expect.any(Number),
@@ -151,7 +153,7 @@ describe("planRoom", () => {
     it("places a container adjacent to a source that has none nearby", () => {
       const room = mockRoom({ level: 2, sources: [{ x: 10, y: 10 }] });
 
-      planRoom(room);
+      planRoom(room, { roadPlan: [] });
 
       expect(room.createConstructionSite).toHaveBeenCalledWith(
         expect.any(Number),
@@ -164,14 +166,17 @@ describe("planRoom", () => {
       );
     });
 
-    it("does not place a container when a built one already covers the source", () => {
+    it("does not place a container when a built one already covers the source and the controller", () => {
       const room = mockRoom({
         level: 2,
         sources: [{ x: 10, y: 10 }],
-        existingContainers: [{ x: 11, y: 10 }]
+        existingContainers: [
+          { x: 11, y: 10 },
+          { x: 41, y: 40 }
+        ]
       });
 
-      planRoom(room);
+      planRoom(room, { roadPlan: [] });
 
       expect(room.createConstructionSite).not.toHaveBeenCalledWith(
         expect.any(Number),
@@ -180,19 +185,42 @@ describe("planRoom", () => {
       );
     });
 
-    it("does not place a container when a pending site already covers the source", () => {
+    it("does not place a container when a pending site already covers the source and the controller", () => {
       const room = mockRoom({
         level: 2,
         sources: [{ x: 10, y: 10 }],
-        pendingContainerSites: [{ x: 11, y: 10 }]
+        pendingContainerSites: [
+          { x: 11, y: 10 },
+          { x: 41, y: 40 }
+        ]
       });
 
-      planRoom(room);
+      planRoom(room, { roadPlan: [] });
 
       expect(room.createConstructionSite).not.toHaveBeenCalledWith(
         expect.any(Number),
         expect.any(Number),
         STRUCTURE_CONTAINER
+      );
+    });
+
+    it("places a container adjacent to the controller once every source is already covered", () => {
+      const room = mockRoom({
+        level: 2,
+        sources: [{ x: 10, y: 10 }],
+        existingContainers: [{ x: 11, y: 10 }]
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_CONTAINER
+      );
+      expect(logger.log).toHaveBeenCalledWith(
+        "construction_site_planned",
+        expect.objectContaining({ room: "W1N1", structureType: STRUCTURE_CONTAINER })
       );
     });
 
@@ -205,7 +233,7 @@ describe("planRoom", () => {
         ]
       });
 
-      planRoom(room);
+      planRoom(room, { roadPlan: [] });
 
       const containerCalls = (
         room.createConstructionSite as ReturnType<typeof vi.fn>
@@ -225,13 +253,35 @@ describe("planRoom", () => {
         get: (x: number) => (x <= 1 ? TERRAIN_MASK_WALL : 0)
       });
 
-      planRoom(room);
+      planRoom(room, { roadPlan: [] });
 
       expect(room.createConstructionSite).toHaveBeenCalledWith(
         expect.any(Number),
         expect.any(Number),
         STRUCTURE_CONTAINER
       );
+    });
+  });
+
+  describe("roads", () => {
+    it("computes and caches a road plan into the passed room memory", () => {
+      const room = mockRoom({ level: 2, findPathResult: [{ x: 24, y: 25 }] });
+      const memory: RoomMemory = {};
+
+      planRoom(room, memory);
+
+      expect(memory.roadPlan).toContainEqual({ x: 24, y: 25 });
+      expect(room.createConstructionSite).toHaveBeenCalledWith(24, 25, STRUCTURE_ROAD);
+    });
+
+    it("reuses an already-cached road plan without recomputing paths", () => {
+      const room = mockRoom({ level: 2 });
+      const memory: RoomMemory = { roadPlan: [{ x: 1, y: 1 }] };
+
+      planRoom(room, memory);
+
+      expect(room.findPath).not.toHaveBeenCalled();
+      expect(room.createConstructionSite).toHaveBeenCalledWith(1, 1, STRUCTURE_ROAD);
     });
   });
 });

@@ -4,7 +4,8 @@ import {
   deliverEnergy,
   findAdjacentContainerWithCapacity,
   harvestFromNearestSource,
-  MOVE_OPTS
+  MOVE_OPTS,
+  withdrawFromNearestContainer
 } from "../../src/roles/shared";
 import { resetRoomCache } from "../../src/utils/roomCache";
 
@@ -197,5 +198,79 @@ describe("findAdjacentContainerWithCapacity", () => {
     ]);
 
     expect(findAdjacentContainerWithCapacity(creep)).toBeUndefined();
+  });
+});
+
+function mockWithdrawCreep(overrides: {
+  containers?: { id: string; usedCapacity: number }[];
+  withdrawResult?: ScreepsReturnCode;
+} = {}) {
+  const containers = overrides.containers ?? [{ id: "container1", usedCapacity: 50 }];
+  const targets = containers.map((c) => ({
+    id: c.id,
+    structureType: STRUCTURE_CONTAINER,
+    store: { getUsedCapacity: () => c.usedCapacity }
+  }));
+
+  return {
+    room: {
+      name: "W1N1",
+      find: vi.fn().mockReturnValue(targets)
+    },
+    pos: {
+      findClosestByPath: vi.fn((candidates: unknown[]) => candidates[0] ?? null)
+    },
+    withdraw: vi.fn().mockReturnValue(overrides.withdrawResult ?? OK),
+    moveTo: vi.fn()
+  } as unknown as Creep;
+}
+
+describe("withdrawFromNearestContainer", () => {
+  it("withdraws from the closest container with energy", () => {
+    const creep = mockWithdrawCreep();
+
+    const acted = withdrawFromNearestContainer(creep);
+
+    expect(acted).toBe(true);
+    expect(creep.withdraw).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "container1" }),
+      RESOURCE_ENERGY
+    );
+  });
+
+  it("moves toward the target when out of withdraw range", () => {
+    const creep = mockWithdrawCreep({ withdrawResult: ERR_NOT_IN_RANGE });
+
+    withdrawFromNearestContainer(creep);
+
+    expect(creep.moveTo).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "container1" }),
+      MOVE_OPTS
+    );
+  });
+
+  it("excludes containers with no energy, falling through to one that has some", () => {
+    const creep = mockWithdrawCreep({
+      containers: [
+        { id: "container1", usedCapacity: 0 },
+        { id: "container2", usedCapacity: 50 }
+      ]
+    });
+
+    withdrawFromNearestContainer(creep);
+
+    expect(creep.withdraw).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "container2" }),
+      RESOURCE_ENERGY
+    );
+  });
+
+  it("returns false and does not withdraw when no container has energy", () => {
+    const creep = mockWithdrawCreep({ containers: [{ id: "container1", usedCapacity: 0 }] });
+
+    const acted = withdrawFromNearestContainer(creep);
+
+    expect(acted).toBe(false);
+    expect(creep.withdraw).not.toHaveBeenCalled();
   });
 });

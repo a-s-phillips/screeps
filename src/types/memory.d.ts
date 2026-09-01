@@ -8,6 +8,7 @@ declare global {
 
   interface RoomMemory {
     lastKnownRCL?: number;
+    roadPlan?: { x: number; y: number }[];
   }
 }
 
