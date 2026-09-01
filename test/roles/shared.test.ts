@@ -317,4 +317,29 @@ describe("withdrawFromNearestContainer", () => {
     expect(acted).toBe(false);
     expect(creep.withdraw).not.toHaveBeenCalled();
   });
+
+  it("skips the excluded container even when it's the closest, falling through to another", () => {
+    const creep = mockWithdrawCreep({
+      containers: [
+        { id: "container1", usedCapacity: 50 },
+        { id: "container2", usedCapacity: 50 }
+      ]
+    });
+
+    withdrawFromNearestContainer(creep, { id: "container1" } as StructureContainer);
+
+    expect(creep.withdraw).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "container2" }),
+      RESOURCE_ENERGY
+    );
+  });
+
+  it("returns false and does not withdraw when the only container with energy is excluded", () => {
+    const creep = mockWithdrawCreep({ containers: [{ id: "container1", usedCapacity: 50 }] });
+
+    const acted = withdrawFromNearestContainer(creep, { id: "container1" } as StructureContainer);
+
+    expect(acted).toBe(false);
+    expect(creep.withdraw).not.toHaveBeenCalled();
+  });
 });

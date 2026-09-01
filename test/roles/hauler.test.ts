@@ -21,6 +21,7 @@ function mockCreep(opts: {
   hasContainer?: boolean;
   spawnFreeCapacity?: number;
   controllerContainerFreeCapacity?: number;
+  controllerContainerUsedEnergy?: number;
 }) {
   const hasContainer = opts.hasContainer ?? true;
 
@@ -30,14 +31,28 @@ function mockCreep(opts: {
     pos: { x: number; y: number };
     store: { getUsedCapacity: () => number; getFreeCapacity: () => number };
   }[] = [];
-  if (hasContainer) {
-    structures.push({ ...container, store: { getUsedCapacity: () => 50, getFreeCapacity: () => 0 } });
-  }
+  // Controller container is pushed first (ahead of the source container below) so that
+  // withdraw-path tests exercise the exclusion logic against the mock's naive
+  // findClosestByPath (which just returns the first candidate) - without exclusion, the
+  // controller container would incorrectly "win" as closest.
   const controllerContainerFreeCapacity = opts.controllerContainerFreeCapacity;
-  if (controllerContainerFreeCapacity !== undefined) {
+  const controllerContainerUsedEnergy = opts.controllerContainerUsedEnergy;
+  if (
+    controllerContainerFreeCapacity !== undefined ||
+    controllerContainerUsedEnergy !== undefined
+  ) {
     structures.push({
       ...controllerContainer,
-      store: { getUsedCapacity: () => 0, getFreeCapacity: () => controllerContainerFreeCapacity }
+      store: {
+        getUsedCapacity: () => controllerContainerUsedEnergy ?? 0,
+        getFreeCapacity: () => controllerContainerFreeCapacity ?? 0
+      }
+    });
+  }
+  if (hasContainer) {
+    structures.push({
+      ...container,
+      store: { getUsedCapacity: () => 50, getFreeCapacity: () => 0 }
     });
   }
 
@@ -120,6 +135,41 @@ describe("hauler role", () => {
 
     expect(creep.withdraw).not.toHaveBeenCalled();
     expect(creep.moveTo).not.toHaveBeenCalled();
+  });
+
+  it("withdraws from the source container, not the controller container, even when the controller container has energy and would otherwise sort first", () => {
+    // Regression test: found live on the official server, haulers were withdrawing
+    // from the controller-adjacent container (draining it right back out after they'd
+    // just filled it) instead of relaying fresh energy in from source containers, which
+    // sat nearly full and undrained on the other side of the room while upgraders
+    // starved.
+    const creep = mockCreep({
+      working: false,
+      usedEnergy: 0,
+      freeCapacity: 100,
+      controllerContainerUsedEnergy: 500
+    });
+
+    run(creep);
+
+    expect(creep.withdraw).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "container1" }),
+      RESOURCE_ENERGY
+    );
+  });
+
+  it("does not withdraw at all when only the controller container has energy", () => {
+    const creep = mockCreep({
+      working: false,
+      usedEnergy: 0,
+      freeCapacity: 100,
+      hasContainer: false,
+      controllerContainerUsedEnergy: 500
+    });
+
+    run(creep);
+
+    expect(creep.withdraw).not.toHaveBeenCalled();
   });
 
   it("delivers energy to the spawn when full and it needs energy", () => {

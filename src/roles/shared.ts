@@ -39,10 +39,11 @@ export function deliverEnergy(creep: Creep): boolean {
   return true;
 }
 
-export function withdrawFromNearestContainer(creep: Creep): boolean {
+export function withdrawFromNearestContainer(creep: Creep, exclude?: StructureContainer): boolean {
   const containers = getCachedFind(creep.room, FIND_STRUCTURES).filter(
     (structure): structure is StructureContainer =>
       structure.structureType === STRUCTURE_CONTAINER &&
+      structure.id !== exclude?.id &&
       structure.store.getUsedCapacity(RESOURCE_ENERGY) > 0
   );
   const target = creep.pos.findClosestByPath(containers);
