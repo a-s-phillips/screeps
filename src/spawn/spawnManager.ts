@@ -2,6 +2,7 @@ import { log } from "../logging/logger";
 import { chebyshevDistance } from "../utils/grid";
 import { getCachedFind } from "../utils/roomCache";
 import { bodyCost, planBody, planMinerBody } from "./bodyPlanner";
+import { isNearingDeath, replacementLeadTime } from "./preSpawn";
 
 export interface RoomState {
   creepCounts: Record<CreepRole, number>;
@@ -133,7 +134,12 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     miner: 0
   };
   const harvesterCreeps: Creep[] = [];
-  const existingMinerSourceIds = new Set<Id<Source>>();
+  // Tracks the healthiest (highest ticksToLive) miner currently assigned to each
+  // source, not just whether one exists - a source whose only assigned miner is about
+  // to die still needs a replacement queued, same as one with no miner at all (see
+  // sourcesNeedingMiner below). A still-spawning miner has ticksToLive === undefined;
+  // treat that as healthy since it can't need a replacement before it even exists.
+  const minerTicksToLiveBySource = new Map<Id<Source>, number>();
 
   for (const name in Game.creeps) {
     const creep = Game.creeps[name];
@@ -142,7 +148,11 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     creepCounts[creep.memory.role]++;
     if (creep.memory.role === "harvester") harvesterCreeps.push(creep);
     if (creep.memory.role === "miner" && creep.memory.sourceId) {
-      existingMinerSourceIds.add(creep.memory.sourceId);
+      const ticksToLive = creep.ticksToLive ?? Infinity;
+      const best = minerTicksToLiveBySource.get(creep.memory.sourceId);
+      if (best === undefined || ticksToLive > best) {
+        minerTicksToLiveBySource.set(creep.memory.sourceId, ticksToLive);
+      }
     }
   }
 
@@ -150,15 +160,27 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
   const containers = getCachedFind(room, FIND_STRUCTURES).filter(
     (structure): structure is StructureContainer => structure.structureType === STRUCTURE_CONTAINER
   );
-  const sourceHasContainer = (source: Source) =>
-    containers.some((container) => chebyshevDistance(source.pos, container.pos) <= 1);
+  const sourceContainer = (source: Source) =>
+    containers.find((container) => chebyshevDistance(source.pos, container.pos) <= 1);
+  const minerBodyLength = planMinerBody(room.energyCapacityAvailable).length;
 
   const state: RoomState = {
     creepCounts,
-    sourcesWithoutContainerCount: activeSources.filter((source) => !sourceHasContainer(source))
-      .length,
+    sourcesWithoutContainerCount: activeSources.filter((source) => !sourceContainer(source)).length,
     sourcesNeedingMiner: activeSources
-      .filter((source) => sourceHasContainer(source) && !existingMinerSourceIds.has(source.id))
+      .filter((source) => {
+        const container = sourceContainer(source);
+        if (!container) return false;
+
+        const bestTicksToLive = minerTicksToLiveBySource.get(source.id);
+        if (bestTicksToLive === undefined) return true;
+
+        const leadTime = replacementLeadTime(
+          minerBodyLength,
+          chebyshevDistance(spawn.pos, container.pos)
+        );
+        return isNearingDeath(bestTicksToLive, leadTime);
+      })
       .map((source) => source.id),
     constructionSiteCount: getCachedFind(room, FIND_CONSTRUCTION_SITES).length,
     containerCount: containers.length,

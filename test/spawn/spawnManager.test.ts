@@ -415,6 +415,54 @@ describe("runSpawning", () => {
     );
   });
 
+  it("pre-spawns a replacement miner, for the same source, once the assigned miner is nearing death", () => {
+    // energyCapacityAvailable 300 -> planMinerBody gives [WORK, WORK, MOVE] (length 3).
+    // Spawn sits at (0,0), the source's container at (10,10) (containerAtSource),
+    // chebyshev distance 10 -> lead time = 3 * CREEP_SPAWN_TIME + 10 = 19. A ticksToLive
+    // of 15 is under that, so the source should read as needing a miner again even
+    // though one is technically still assigned.
+    vi.stubGlobal("Game", {
+      time: 12345,
+      creeps: {
+        m1: {
+          room: { name: "W1N1" },
+          memory: { role: "miner", working: false, sourceId: "source1" },
+          ticksToLive: 15
+        }
+      }
+    });
+    const spawn = mockSpawn(false);
+
+    runSpawning(spawn, mockRoom({ containers: 1, containerAtSource: true }));
+
+    expect(spawn.spawnCreep).toHaveBeenCalledWith(expect.arrayContaining([WORK]), "miner_12345", {
+      memory: { role: "miner", working: false, sourceId: "source1" }
+    });
+  });
+
+  it("does not pre-spawn a replacement miner while the assigned miner still has plenty of ticksToLive", () => {
+    // Same setup as above (lead time 19), but ticksToLive 25 is comfortably above it.
+    vi.stubGlobal("Game", {
+      time: 12345,
+      creeps: {
+        m1: {
+          room: { name: "W1N1" },
+          memory: { role: "miner", working: false, sourceId: "source1" },
+          ticksToLive: 25
+        }
+      }
+    });
+    const spawn = mockSpawn(false);
+
+    runSpawning(spawn, mockRoom({ containers: 1, containerAtSource: true }));
+
+    expect(spawn.spawnCreep).not.toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.stringMatching(/^miner_/),
+      expect.anything()
+    );
+  });
+
   it("recycles surplus harvesters, oldest (lowest ticksToLive) first, once their source has a miner covering it", () => {
     vi.stubGlobal("Game", {
       time: 12345,
