@@ -27,28 +27,36 @@ function harvesterTargetFor(state: RoomState): number {
 }
 
 export function decideNextSpawn(state: RoomState): SpawnDecision | null {
-  // With no harvester or miner at all, nothing is generating energy - energyAvailable
-  // can only ever shrink from here, so waiting for the full-capacity "ideal" body to
-  // become affordable would deadlock the room forever. Size just the income roles
-  // (harvester/miner) down to whatever's actually on hand in that one case, to get
-  // any income creep out and restart the flow. Once an income creep exists, revert to
-  // the normal "wait, don't shrink" policy - the room isn't stuck, so there's no need
-  // to risk a permanently undersized creep.
-  const hasIncomeCreep = state.creepCounts.harvester + state.creepCounts.miner > 0;
-  const incomeSizingCapacity = hasIncomeCreep
+  // Only harvester (self-delivers) and hauler (withdraws from a container, delivers to
+  // spawn) ever get energy INTO the spawn - a miner alone just piles energy up in a
+  // container that nothing collects. With neither a harvester nor a hauler, energy can
+  // only shrink from here, so waiting for the full-capacity "ideal" body to become
+  // affordable would deadlock the room forever (confirmed live: a lone bootstrap miner
+  // filled its container while the hauler needed to move that energy stayed
+  // permanently unaffordable at full sizing). Size the roles that can restore a
+  // spawn-feeder - harvester, miner, and hauler - down to whatever's actually on hand
+  // in that one case. Once a harvester or hauler exists, revert to the normal "wait,
+  // don't shrink" policy - the room isn't stuck, so there's no need to risk a
+  // permanently undersized creep.
+  const hasSpawnFeeder = state.creepCounts.harvester + state.creepCounts.hauler > 0;
+  const bootstrapSizingCapacity = hasSpawnFeeder
     ? state.energyCapacityAvailable
     : Math.min(state.energyCapacityAvailable, state.energyAvailable);
 
   if (state.sourcesNeedingMiner.length > 0) {
-    const body = planMinerBody(incomeSizingCapacity);
+    const body = planMinerBody(bootstrapSizingCapacity);
     if (body.length > 0 && bodyCost(body) <= state.energyAvailable) {
       return { role: "miner", body, memory: { sourceId: state.sourcesNeedingMiner[0] } };
     }
   }
 
   const targets: { role: Exclude<CreepRole, "miner">; target: number; sizingCapacity: number }[] = [
-    { role: "harvester", target: harvesterTargetFor(state), sizingCapacity: incomeSizingCapacity },
-    { role: "hauler", target: state.containerCount, sizingCapacity: state.energyCapacityAvailable },
+    {
+      role: "harvester",
+      target: harvesterTargetFor(state),
+      sizingCapacity: bootstrapSizingCapacity
+    },
+    { role: "hauler", target: state.containerCount, sizingCapacity: bootstrapSizingCapacity },
     { role: "upgrader", target: 2, sizingCapacity: state.energyCapacityAvailable },
     {
       role: "builder",
