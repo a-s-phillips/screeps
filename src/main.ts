@@ -11,6 +11,7 @@ import { run as runHauler } from "./roles/hauler";
 import { run as runMiner } from "./roles/miner";
 import { run as runUpgrader } from "./roles/upgrader";
 import { runSpawning } from "./spawn/spawnManager";
+import { run as runTower } from "./structures/tower";
 import { getCachedFind, resetRoomCache } from "./utils/roomCache";
 
 const roleRunners: Record<CreepRole, (creep: Creep) => void> = {
@@ -53,6 +54,11 @@ export function loop(): void {
       recordHostileSighting(Memory.rooms[roomName], hostiles);
       const levelUp = checkLevelUp(room, Memory.rooms[roomName]);
       if (levelUp) log("level_up", levelUp);
+
+      const towers = getCachedFind(room, FIND_MY_STRUCTURES).filter(
+        (structure): structure is StructureTower => structure.structureType === STRUCTURE_TOWER
+      );
+      for (const tower of towers) runTower(tower);
 
       planRoom(room, Memory.rooms[roomName]);
     }

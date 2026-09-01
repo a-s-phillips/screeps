@@ -153,6 +153,51 @@ describe("deliverEnergy", () => {
     expect(acted).toBe(false);
     expect(creep.transfer).not.toHaveBeenCalled();
   });
+
+  it("delivers to a tower when no spawn or extension needs energy", () => {
+    const creep = mockDeliveryCreep({
+      structures: [
+        { id: "spawn1", structureType: STRUCTURE_SPAWN, freeCapacity: 0 },
+        { id: "tower1", structureType: STRUCTURE_TOWER, freeCapacity: 200 }
+      ]
+    });
+
+    const acted = deliverEnergy(creep);
+
+    expect(acted).toBe(true);
+    expect(creep.transfer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "tower1" }),
+      RESOURCE_ENERGY
+    );
+  });
+
+  it("picks whichever of a tower or an extension is closest, not a fixed priority", () => {
+    const creep = mockDeliveryCreep({
+      structures: [
+        { id: "tower1", structureType: STRUCTURE_TOWER, freeCapacity: 200 },
+        { id: "ext1", structureType: STRUCTURE_EXTENSION, freeCapacity: 50 }
+      ]
+    });
+
+    const acted = deliverEnergy(creep);
+
+    expect(acted).toBe(true);
+    expect(creep.transfer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "tower1" }),
+      RESOURCE_ENERGY
+    );
+  });
+
+  it("excludes a tower with no free capacity", () => {
+    const creep = mockDeliveryCreep({
+      structures: [{ id: "tower1", structureType: STRUCTURE_TOWER, freeCapacity: 0 }]
+    });
+
+    const acted = deliverEnergy(creep);
+
+    expect(acted).toBe(false);
+    expect(creep.transfer).not.toHaveBeenCalled();
+  });
 });
 
 function mockContainerCreep(

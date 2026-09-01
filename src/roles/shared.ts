@@ -23,11 +23,17 @@ export function harvestFromNearestSource(creep: Creep): void {
   }
 }
 
+// Spawn, extensions, and towers are treated as one pool rather than spawn/extension-first:
+// a strict priority tier left towers permanently starved in practice, because extensions
+// rarely sit at 100% full in an active colony (creeps constantly draw them down on spawn),
+// so the tower's "leftovers" tier almost never triggered. Closest-need-wins still keeps
+// spawning covered in the common case, since extensions cluster near the spawn.
 export function deliverEnergy(creep: Creep): boolean {
   const targets = getCachedFind(creep.room, FIND_MY_STRUCTURES).filter(
-    (structure): structure is StructureSpawn | StructureExtension =>
+    (structure): structure is StructureSpawn | StructureExtension | StructureTower =>
       (structure.structureType === STRUCTURE_SPAWN ||
-        structure.structureType === STRUCTURE_EXTENSION) &&
+        structure.structureType === STRUCTURE_EXTENSION ||
+        structure.structureType === STRUCTURE_TOWER) &&
       structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0
   );
   const target = creep.pos.findClosestByPath(targets);

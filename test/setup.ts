@@ -8,6 +8,7 @@ Object.assign(globalThis, {
   ERR_NOT_ENOUGH_ENERGY: -6,
 
   FIND_CREEPS: 101,
+  FIND_MY_CREEPS: 102,
   FIND_HOSTILE_CREEPS: 103,
   FIND_SOURCES_ACTIVE: 104,
   FIND_SOURCES: 105,
@@ -33,6 +34,8 @@ Object.assign(globalThis, {
   STRUCTURE_SPAWN: "spawn",
   STRUCTURE_ROAD: "road",
   STRUCTURE_TOWER: "tower",
+  STRUCTURE_WALL: "constructedWall",
+  STRUCTURE_RAMPART: "rampart",
   TERRAIN_MASK_WALL: 1,
   TERRAIN_MASK_SWAMP: 2,
 
