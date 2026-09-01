@@ -27,24 +27,40 @@ function harvesterTargetFor(state: RoomState): number {
 }
 
 export function decideNextSpawn(state: RoomState): SpawnDecision | null {
+  // With no harvester or miner at all, nothing is generating energy - energyAvailable
+  // can only ever shrink from here, so waiting for the full-capacity "ideal" body to
+  // become affordable would deadlock the room forever. Size just the income roles
+  // (harvester/miner) down to whatever's actually on hand in that one case, to get
+  // any income creep out and restart the flow. Once an income creep exists, revert to
+  // the normal "wait, don't shrink" policy - the room isn't stuck, so there's no need
+  // to risk a permanently undersized creep.
+  const hasIncomeCreep = state.creepCounts.harvester + state.creepCounts.miner > 0;
+  const incomeSizingCapacity = hasIncomeCreep
+    ? state.energyCapacityAvailable
+    : Math.min(state.energyCapacityAvailable, state.energyAvailable);
+
   if (state.sourcesNeedingMiner.length > 0) {
-    const body = planMinerBody(state.energyCapacityAvailable);
+    const body = planMinerBody(incomeSizingCapacity);
     if (body.length > 0 && bodyCost(body) <= state.energyAvailable) {
       return { role: "miner", body, memory: { sourceId: state.sourcesNeedingMiner[0] } };
     }
   }
 
-  const targets: { role: Exclude<CreepRole, "miner">; target: number }[] = [
-    { role: "harvester", target: harvesterTargetFor(state) },
-    { role: "hauler", target: state.containerCount },
-    { role: "upgrader", target: 2 },
-    { role: "builder", target: state.constructionSiteCount > 0 ? 2 : 0 }
+  const targets: { role: Exclude<CreepRole, "miner">; target: number; sizingCapacity: number }[] = [
+    { role: "harvester", target: harvesterTargetFor(state), sizingCapacity: incomeSizingCapacity },
+    { role: "hauler", target: state.containerCount, sizingCapacity: state.energyCapacityAvailable },
+    { role: "upgrader", target: 2, sizingCapacity: state.energyCapacityAvailable },
+    {
+      role: "builder",
+      target: state.constructionSiteCount > 0 ? 2 : 0,
+      sizingCapacity: state.energyCapacityAvailable
+    }
   ];
 
-  for (const { role, target } of targets) {
+  for (const { role, target, sizingCapacity } of targets) {
     if (state.creepCounts[role] >= target) continue;
 
-    const body = planBody(role, state.energyCapacityAvailable);
+    const body = planBody(role, sizingCapacity);
     if (body.length > 0 && bodyCost(body) <= state.energyAvailable) return { role, body };
   }
 

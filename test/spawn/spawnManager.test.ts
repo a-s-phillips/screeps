@@ -90,16 +90,64 @@ describe("decideNextSpawn", () => {
     expect(decideNextSpawn(state)).toBeNull();
   });
 
-  it("skips a role for this tick rather than downsizing its body to fit leftover energy", () => {
+  it("skips a role for this tick rather than downsizing its body, once an income creep already exists", () => {
     // Capacity supports a full 2-block (600 energy) harvester and a 4-block (800
     // energy) upgrader, but only 300 energy is on hand right now. Sizing off
     // available energy (the old, buggy behavior) would spawn a runt 1-block
-    // harvester (300 energy) that's stuck that size forever. The fix should
-    // instead wait: neither role's ideal, capacity-sized body is affordable yet.
+    // harvester (300 energy) that's stuck that size forever. With a harvester
+    // already generating income, the room isn't stuck - it's fine to wait for
+    // the ideal, capacity-sized body to become affordable instead of shrinking.
+    const state = baseState({
+      creepCounts: { harvester: 1, upgrader: 0, builder: 0, hauler: 0, miner: 0 },
+      energyAvailable: 300,
+      energyCapacityAvailable: 800
+    });
+
+    expect(decideNextSpawn(state)).toBeNull();
+  });
+
+  it("sizes the harvester body down to fit available energy when no income creep exists yet", () => {
+    // Same capacity/available split as above, but with zero harvesters *and* zero
+    // miners, nothing is generating energy at all - energyAvailable can only ever
+    // shrink from here, so waiting for the full-capacity body would deadlock the
+    // room forever. Shrinking just this once, to get any income creep out, is the
+    // fix - this is a different scenario from the "already has income" test above.
     const state = baseState({
       creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 0, miner: 0 },
       energyAvailable: 300,
       energyCapacityAvailable: 800
+    });
+
+    const decision = decideNextSpawn(state);
+
+    expect(decision?.role).toBe("harvester");
+    expect(decision?.body).toEqual([WORK, WORK, CARRY, MOVE]);
+  });
+
+  it("sizes the miner body down to fit available energy when no income creep exists yet", () => {
+    const state = baseState({
+      sourcesNeedingMiner: ["source1" as Id<Source>],
+      creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 0, miner: 0 },
+      energyAvailable: 250,
+      energyCapacityAvailable: 1300
+    });
+
+    const decision = decideNextSpawn(state);
+
+    expect(decision?.role).toBe("miner");
+    expect(decision?.memory).toEqual({ sourceId: "source1" });
+    expect(decision?.body).toEqual([WORK, WORK, MOVE]);
+  });
+
+  it("does not shrink the miner body for an already-covered room just because a different source needs one", () => {
+    // A miner already exists (income isn't zero), so the newly-needed miner for a
+    // second source should still wait for its ideal, capacity-sized body rather
+    // than spawning undersized.
+    const state = baseState({
+      sourcesNeedingMiner: ["source2" as Id<Source>],
+      creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 0, miner: 1 },
+      energyAvailable: 300,
+      energyCapacityAvailable: 1300
     });
 
     expect(decideNextSpawn(state)).toBeNull();
