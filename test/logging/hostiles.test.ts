@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { detectNewHostiles } from "../../src/logging/hostiles";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { detectNewHostiles, recordHostileSighting } from "../../src/logging/hostiles";
 
 function mockHostile(
   id: string,
@@ -50,5 +50,30 @@ describe("detectNewHostiles", () => {
 
     expect(result.sightings).toEqual([]);
     expect(result.seenIds.size).toBe(0);
+  });
+});
+
+describe("recordHostileSighting", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("stamps lastHostileSeenTick with the current tick when hostiles are present", () => {
+    vi.stubGlobal("Game", { time: 12345 });
+    const hostile = mockHostile("h1", "CrazyPagi", "W1N1", [ATTACK]);
+    const memory: RoomMemory = {};
+
+    recordHostileSighting(memory, [hostile]);
+
+    expect(memory.lastHostileSeenTick).toBe(12345);
+  });
+
+  it("does not touch lastHostileSeenTick when there are no hostiles", () => {
+    vi.stubGlobal("Game", { time: 12345 });
+    const memory: RoomMemory = { lastHostileSeenTick: 100 };
+
+    recordHostileSighting(memory, []);
+
+    expect(memory.lastHostileSeenTick).toBe(100);
   });
 });

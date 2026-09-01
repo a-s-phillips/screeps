@@ -6,7 +6,11 @@ interface RoadTile {
   y: number;
 }
 
-function computeRoadPlan(room: Room, spawn: StructureSpawn, controller: StructureController): RoadTile[] {
+function computeRoadPlan(
+  room: Room,
+  spawn: StructureSpawn,
+  controller: StructureController
+): RoadTile[] {
   const destinations: RoomPosition[] = [
     ...getCachedFind(room, FIND_SOURCES).map((source) => source.pos),
     controller.pos
@@ -16,7 +20,13 @@ function computeRoadPlan(room: Room, spawn: StructureSpawn, controller: Structur
   const tiles: RoadTile[] = [];
 
   for (const destination of destinations) {
-    const path = room.findPath(spawn.pos, destination, { ignoreCreeps: true, ignoreRoads: true });
+    // range: 1 keeps roads off the source/controller tile itself — those are unwalkable,
+    // so a range-0 path lands a road there at the 150x wall-terrain cost multiplier.
+    const path = room.findPath(spawn.pos, destination, {
+      ignoreCreeps: true,
+      ignoreRoads: true,
+      range: 1
+    });
     for (const step of path) {
       const key = `${step.x},${step.y}`;
       if (seen.has(key)) continue;
@@ -28,12 +38,15 @@ function computeRoadPlan(room: Room, spawn: StructureSpawn, controller: Structur
   return tiles;
 }
 
-export function planRoads(room: Room, memory: RoomMemory): void {
-  if (!room.controller) return;
+// Returns whether the road queue is empty (every planned tile already has a built or
+// pending road) - used by the room planner to gate lower-priority construction (e.g.
+// towers) behind higher-priority roads being done.
+export function planRoads(room: Room, memory: RoomMemory): boolean {
+  if (!room.controller) return false;
 
   if (!memory.roadPlan) {
     const spawn = getCachedFind(room, FIND_MY_SPAWNS)[0];
-    if (!spawn) return;
+    if (!spawn) return false;
     memory.roadPlan = computeRoadPlan(room, spawn, room.controller);
   }
 
@@ -61,6 +74,8 @@ export function planRoads(room: Room, memory: RoomMemory): void {
         structureType: STRUCTURE_ROAD
       });
     }
-    return;
+    return false;
   }
+
+  return true;
 }

@@ -32,6 +32,7 @@ Object.assign(globalThis, {
   STRUCTURE_CONTAINER: "container",
   STRUCTURE_SPAWN: "spawn",
   STRUCTURE_ROAD: "road",
+  STRUCTURE_TOWER: "tower",
   TERRAIN_MASK_WALL: 1,
   TERRAIN_MASK_SWAMP: 2,
 
@@ -52,6 +53,7 @@ Object.assign(globalThis, {
   },
   CONTROLLER_STRUCTURES: {
     extension: { 0: 0, 1: 0, 2: 5, 3: 10, 4: 20, 5: 30, 6: 40, 7: 50, 8: 60 },
-    container: { 0: 5, 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 5, 8: 5 }
+    container: { 0: 5, 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 5, 8: 5 },
+    tower: { 0: 0, 1: 0, 2: 0, 3: 1, 4: 1, 5: 2, 6: 2, 7: 3, 8: 6 }
   }
 });

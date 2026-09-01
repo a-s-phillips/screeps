@@ -34,3 +34,9 @@ export function detectNewHostiles(
 
   return { sightings, seenIds };
 }
+
+export function recordHostileSighting(memory: RoomMemory, hostiles: Creep[]): void {
+  if (hostiles.length > 0) {
+    memory.lastHostileSeenTick = Game.time;
+  }
+}

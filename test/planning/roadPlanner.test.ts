@@ -98,6 +98,26 @@ describe("planRoads", () => {
     ]);
   });
 
+  it("paths to within range 1 of each source and the controller instead of onto their tile", () => {
+    const room = mockRoom({
+      findPathResult: { "10,10": [{ x: 24, y: 25 }], "40,40": [{ x: 27, y: 25 }] }
+    });
+    const memory: RoomMemory = {};
+
+    planRoads(room, memory);
+
+    expect(room.findPath).toHaveBeenCalledWith(
+      { x: 25, y: 25 },
+      { x: 10, y: 10 },
+      expect.objectContaining({ range: 1 })
+    );
+    expect(room.findPath).toHaveBeenCalledWith(
+      { x: 25, y: 25 },
+      { x: 40, y: 40 },
+      expect.objectContaining({ range: 1 })
+    );
+  });
+
   it("dedupes tiles shared by more than one path", () => {
     const room = mockRoom({
       findPathResult: {

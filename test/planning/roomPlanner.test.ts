@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { planRoom } from "../../src/planning/roomPlanner";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { planRoom, planTowers } from "../../src/planning/roomPlanner";
 import { resetRoomCache } from "../../src/utils/roomCache";
 import * as logger from "../../src/logging/logger";
 
@@ -14,6 +14,8 @@ function mockRoom(opts: {
   pendingContainerSites?: { x: number; y: number }[];
   existingRoads?: { x: number; y: number }[];
   pendingRoadSites?: { x: number; y: number }[];
+  existingTowers?: { x: number; y: number }[];
+  pendingTowerSites?: { x: number; y: number }[];
   createResult?: ScreepsReturnCode;
   findPathResult?: { x: number; y: number }[];
 }) {
@@ -24,6 +26,8 @@ function mockRoom(opts: {
   const pendingContainerSites = opts.pendingContainerSites ?? [];
   const existingRoads = opts.existingRoads ?? [];
   const pendingRoadSites = opts.pendingRoadSites ?? [];
+  const existingTowers = opts.existingTowers ?? [];
+  const pendingTowerSites = opts.pendingTowerSites ?? [];
   const spawn = { pos: { x: 25, y: 25 } };
 
   const room = {
@@ -31,7 +35,10 @@ function mockRoom(opts: {
     controller: { level: opts.level, pos: { x: 40, y: 40 } },
     find: vi.fn((type: FindConstant) => {
       if (type === FIND_MY_STRUCTURES) {
-        return existingExtensions.map((p) => ({ structureType: STRUCTURE_EXTENSION, pos: p }));
+        return [
+          ...existingExtensions.map((p) => ({ structureType: STRUCTURE_EXTENSION, pos: p })),
+          ...existingTowers.map((p) => ({ structureType: STRUCTURE_TOWER, pos: p }))
+        ];
       }
       if (type === FIND_STRUCTURES) {
         return [
@@ -43,7 +50,8 @@ function mockRoom(opts: {
         return [
           ...pendingExtensionSites.map((p) => ({ structureType: STRUCTURE_EXTENSION, pos: p })),
           ...pendingContainerSites.map((p) => ({ structureType: STRUCTURE_CONTAINER, pos: p })),
-          ...pendingRoadSites.map((p) => ({ structureType: STRUCTURE_ROAD, pos: p }))
+          ...pendingRoadSites.map((p) => ({ structureType: STRUCTURE_ROAD, pos: p })),
+          ...pendingTowerSites.map((p) => ({ structureType: STRUCTURE_TOWER, pos: p }))
         ];
       }
       if (type === FIND_CONSTRUCTION_SITES) return [];
@@ -63,6 +71,11 @@ describe("planRoom", () => {
   beforeEach(() => {
     resetRoomCache();
     vi.mocked(logger.log).mockClear();
+    vi.stubGlobal("Game", { time: 0 });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("does nothing when the room has no controller", () => {
@@ -317,6 +330,105 @@ describe("planRoom", () => {
 
       expect(room.findPath).not.toHaveBeenCalled();
       expect(room.createConstructionSite).toHaveBeenCalledWith(1, 1, STRUCTURE_ROAD);
+    });
+  });
+
+  describe("towers", () => {
+    // Extension cap at RCL3 is 10 (test/setup.ts) - fill it so planExtensions reports done.
+    const extensionsAtCap = Array.from({ length: 10 }, (_, i) => ({ x: i, y: i }));
+
+    it("does nothing when already at the tower cap for RCL", () => {
+      const room = mockRoom({
+        level: 3,
+        existingExtensions: extensionsAtCap,
+        existingTowers: [{ x: 30, y: 30 }]
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_TOWER
+      );
+    });
+
+    it("does not place a tower while extensions still need building", () => {
+      const room = mockRoom({ level: 3 });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_TOWER
+      );
+    });
+
+    it("does not place a tower while roads still need building", () => {
+      const room = mockRoom({ level: 3, existingExtensions: extensionsAtCap });
+
+      planRoom(room, { roadPlan: [{ x: 1, y: 1 }] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_TOWER
+      );
+    });
+
+    it("places a tower once both the extension and road queues are empty", () => {
+      const room = mockRoom({ level: 3, existingExtensions: extensionsAtCap });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_TOWER
+      );
+      expect(logger.log).toHaveBeenCalledWith(
+        "construction_site_planned",
+        expect.objectContaining({ room: "W1N1", structureType: STRUCTURE_TOWER })
+      );
+    });
+
+    it("places a tower when a hostile was seen recently, even with extensions/roads pending", () => {
+      vi.stubGlobal("Game", { time: 500 });
+      const room = mockRoom({ level: 3 });
+
+      planRoom(room, { roadPlan: [{ x: 1, y: 1 }], lastHostileSeenTick: 200 });
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_TOWER
+      );
+    });
+
+    it("does not place a tower when the last hostile sighting is outside the memory window", () => {
+      vi.stubGlobal("Game", { time: 5000 });
+      const room = mockRoom({ level: 3 });
+
+      planRoom(room, { roadPlan: [{ x: 1, y: 1 }], lastHostileSeenTick: 200 });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_TOWER
+      );
+    });
+
+    it("places a tower when overridePriority is explicitly true, regardless of the other gates", () => {
+      const room = mockRoom({ level: 3 });
+
+      planTowers(room, { roadPlan: [{ x: 1, y: 1 }] }, false, true);
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_TOWER
+      );
     });
   });
 });

@@ -1,5 +1,5 @@
 import { runWithErrorLogging } from "./logging/errorHandler";
-import { detectNewHostiles } from "./logging/hostiles";
+import { detectNewHostiles, recordHostileSighting } from "./logging/hostiles";
 import { checkLevelUp } from "./logging/levelUp";
 import { flushLogBuffer, log } from "./logging/logger";
 import { buildCpuSummary, buildTickSummary } from "./logging/tickSummary";
@@ -50,6 +50,7 @@ export function loop(): void {
       }
 
       Memory.rooms[roomName] = Memory.rooms[roomName] || {};
+      recordHostileSighting(Memory.rooms[roomName], hostiles);
       const levelUp = checkLevelUp(room, Memory.rooms[roomName]);
       if (levelUp) log("level_up", levelUp);
 

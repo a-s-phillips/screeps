@@ -4,6 +4,12 @@ import { getCachedFind } from "../utils/roomCache";
 import { findContainerSite } from "./containerPlanner";
 import { findExtensionSite } from "./extensionPlanner";
 import { planRoads } from "./roadPlanner";
+import { findTowerSite } from "./towerPlanner";
+
+// Ticks a hostile sighting keeps the tower-priority gate open after last seen - tune freely.
+const HOSTILE_MEMORY_WINDOW = 1000;
+// Flip to true (and redeploy) to force tower construction now, bypassing the a/b gates below.
+export const TOWER_PRIORITY_OVERRIDE = false;
 
 function buildOccupancy(room: Room): {
   isWalkable: (x: number, y: number) => boolean;
@@ -34,8 +40,11 @@ function buildOccupancy(room: Room): {
   };
 }
 
-function planExtensions(room: Room): void {
-  if (!room.controller) return;
+// Returns whether the extension queue is empty (at/over cap, nothing left to build) -
+// used by the room planner to gate lower-priority construction (e.g. towers) behind
+// higher-priority extensions being done.
+function planExtensions(room: Room): boolean {
+  if (!room.controller) return false;
 
   const allowed = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.controller.level] ?? 0;
 
@@ -46,14 +55,14 @@ function planExtensions(room: Room): void {
     (site) => site.structureType === STRUCTURE_EXTENSION
   ).length;
 
-  if (existingExtensions + pendingExtensionSites >= allowed) return;
+  if (existingExtensions + pendingExtensionSites >= allowed) return true;
 
   const spawn = getCachedFind(room, FIND_MY_SPAWNS)[0];
-  if (!spawn) return;
+  if (!spawn) return false;
 
   const { isWalkable, isOccupied } = buildOccupancy(room);
   const site = findExtensionSite(isWalkable, isOccupied, { x: spawn.pos.x, y: spawn.pos.y });
-  if (!site) return;
+  if (!site) return false;
 
   const result = room.createConstructionSite(site.x, site.y, STRUCTURE_EXTENSION);
   if (result === OK) {
@@ -64,6 +73,7 @@ function planExtensions(room: Room): void {
       structureType: STRUCTURE_EXTENSION
     });
   }
+  return false;
 }
 
 function planContainers(room: Room): void {
@@ -112,8 +122,57 @@ function planContainers(room: Room): void {
   }
 }
 
+// Only queues a tower once it won't compete with higher-priority construction: the
+// extension/road queues are both empty, a hostile has been seen recently, or a human
+// has explicitly flipped the override. `overridePriority` is an explicit parameter
+// (defaulting to the module constant) rather than read directly, so this branch stays
+// unit-testable without mutating shared module state.
+export function planTowers(
+  room: Room,
+  memory: RoomMemory,
+  essentialQueueEmpty: boolean,
+  overridePriority = TOWER_PRIORITY_OVERRIDE
+): void {
+  if (!room.controller) return;
+
+  const allowed = CONTROLLER_STRUCTURES[STRUCTURE_TOWER][room.controller.level] ?? 0;
+
+  const existingTowers = getCachedFind(room, FIND_MY_STRUCTURES).filter(
+    (structure) => structure.structureType === STRUCTURE_TOWER
+  ).length;
+  const pendingTowerSites = getCachedFind(room, FIND_MY_CONSTRUCTION_SITES).filter(
+    (site) => site.structureType === STRUCTURE_TOWER
+  ).length;
+
+  if (existingTowers + pendingTowerSites >= allowed) return;
+
+  const hostileRecentlySeen =
+    memory.lastHostileSeenTick !== undefined &&
+    Game.time - memory.lastHostileSeenTick <= HOSTILE_MEMORY_WINDOW;
+
+  if (!overridePriority && !hostileRecentlySeen && !essentialQueueEmpty) return;
+
+  const spawn = getCachedFind(room, FIND_MY_SPAWNS)[0];
+  if (!spawn) return;
+
+  const { isWalkable, isOccupied } = buildOccupancy(room);
+  const site = findTowerSite(isWalkable, isOccupied, { x: spawn.pos.x, y: spawn.pos.y });
+  if (!site) return;
+
+  const result = room.createConstructionSite(site.x, site.y, STRUCTURE_TOWER);
+  if (result === OK) {
+    log("construction_site_planned", {
+      room: room.name,
+      x: site.x,
+      y: site.y,
+      structureType: STRUCTURE_TOWER
+    });
+  }
+}
+
 export function planRoom(room: Room, memory: RoomMemory): void {
-  planExtensions(room);
+  const extensionsDone = planExtensions(room);
   planContainers(room);
-  planRoads(room, memory);
+  const roadsDone = planRoads(room, memory);
+  planTowers(room, memory, extensionsDone && roadsDone);
 }
