@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { decideNextSpawn, runSpawning, RoomState } from "../../src/spawn/spawnManager";
 import { resetRoomCache } from "../../src/utils/roomCache";
+import { chebyshevDistance } from "../../src/utils/grid";
 import * as logger from "../../src/logging/logger";
 
 vi.mock("../../src/logging/logger", () => ({ log: vi.fn() }));
@@ -263,6 +264,7 @@ describe("runSpawning", () => {
       containerAtSource?: boolean;
       energyAvailable?: number;
       controllerLevel?: number;
+      constructionSites?: { pos: { x: number; y: number } }[];
     } = {}
   ) {
     // Containers default far from the source so pre-existing tests (which only care
@@ -281,7 +283,7 @@ describe("runSpawning", () => {
       controller: { level: opts.controllerLevel ?? 1, pos: controllerPos },
       find: vi.fn((type: FindConstant) => {
         if (type === FIND_SOURCES_ACTIVE) return [{ id: "source1", pos: sourcePos }];
-        if (type === FIND_CONSTRUCTION_SITES) return [];
+        if (type === FIND_CONSTRUCTION_SITES) return opts.constructionSites ?? [];
         if (type === FIND_STRUCTURES) return containers;
         return [];
       })
@@ -291,7 +293,18 @@ describe("runSpawning", () => {
   function mockSpawn(spawning = false, pos: { x: number; y: number } = { x: 0, y: 0 }) {
     return {
       spawning,
-      pos,
+      pos: {
+        ...pos,
+        // Real RoomPosition#findClosestByPath does actual pathfinding; an open test
+        // room has no terrain to route around, so nearest-by-chebyshev-distance is an
+        // equivalent stand-in here.
+        findClosestByPath: <T extends { pos: { x: number; y: number } }>(targets: T[]): T | null =>
+          targets.length === 0
+            ? null
+            : targets.reduce((closest, t) =>
+                chebyshevDistance(pos, t.pos) < chebyshevDistance(pos, closest.pos) ? t : closest
+              )
+      },
       spawnCreep: vi.fn().mockReturnValue(OK),
       recycleCreep: vi.fn()
     } as unknown as StructureSpawn;
@@ -583,6 +596,57 @@ describe("runSpawning", () => {
     const spawn = mockSpawn(false);
 
     runSpawning(spawn, mockRoom());
+
+    expect(spawn.spawnCreep).not.toHaveBeenCalled();
+  });
+
+  it("pre-spawns a replacement builder once one is nearing death", () => {
+    // planBody("builder", 300) -> [WORK, CARRY, MOVE] (length 3). Spawn at (0,0), the
+    // lone construction site at (15,15) (chebyshev 15) -> lead time =
+    // 3 * CREEP_SPAWN_TIME + 15 = 24. A ticksToLive of 15 is under that, so the dying
+    // builder shouldn't count toward the (1-site) target of 1 - leaving room for a 2nd.
+    vi.stubGlobal("Game", {
+      time: 12345,
+      creeps: {
+        h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        u1: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } },
+        u2: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } },
+        b1: {
+          room: { name: "W1N1" },
+          memory: { role: "builder", working: false },
+          ticksToLive: 15
+        }
+      }
+    });
+    const spawn = mockSpawn(false);
+
+    runSpawning(spawn, mockRoom({ constructionSites: [{ pos: { x: 15, y: 15 } }] }));
+
+    expect(spawn.spawnCreep).toHaveBeenCalledWith(expect.any(Array), "builder_12345", {
+      memory: { role: "builder", working: false }
+    });
+  });
+
+  it("does not pre-spawn a builder replacement while ticksToLive is comfortably above the lead time", () => {
+    // Same setup (lead time 24), but ticksToLive 100 is well above it.
+    vi.stubGlobal("Game", {
+      time: 12345,
+      creeps: {
+        h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        u1: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } },
+        u2: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } },
+        b1: {
+          room: { name: "W1N1" },
+          memory: { role: "builder", working: false },
+          ticksToLive: 100
+        }
+      }
+    });
+    const spawn = mockSpawn(false);
+
+    runSpawning(spawn, mockRoom({ constructionSites: [{ pos: { x: 15, y: 15 } }] }));
 
     expect(spawn.spawnCreep).not.toHaveBeenCalled();
   });

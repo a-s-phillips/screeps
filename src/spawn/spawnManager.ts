@@ -141,11 +141,17 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
   // treat that as healthy since it can't need a replacement before it even exists.
   const minerTicksToLiveBySource = new Map<Id<Source>, number>();
 
-  // Upgraders are fungible (unlike miners, any one can replace any other), so a dying
-  // upgrader just needs to stop counting toward the target early - decideNextSpawn's
-  // usual "under target" check takes care of the rest. Working upgraders always head
-  // straight for the controller (see upgrader.ts), a fixed position, so - same as the
-  // miner case - the lead time is precise and can be computed once up front.
+  // Upgraders and builders are fungible (unlike miners, any one can replace any other
+  // of the same role), so a dying one just needs to stop counting toward the target
+  // early - decideNextSpawn's usual "under target" check takes care of the rest.
+  //
+  // Working upgraders always head straight for the controller (see upgrader.ts) - a
+  // fixed position - so, same as the miner case, that lead time is precise. Builders
+  // re-target every tick to whichever construction site is closest by path (or the
+  // controller once none remain, see builder.ts), so there's no fixed destination to
+  // precompute a distance to in advance - "spawn -> nearest site right now" is the best
+  // available proxy for where a freshly-spawned builder would actually head, and it's
+  // inherently a soft estimate rather than a guarantee.
   const upgraderLeadTime = room.controller
     ? replacementLeadTime(
         planBody("upgrader", room.energyCapacityAvailable).length,
@@ -153,13 +159,26 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
       )
     : 0;
 
+  const nearestSite = spawn.pos.findClosestByPath(getCachedFind(room, FIND_CONSTRUCTION_SITES));
+  const builderTargetPos = nearestSite?.pos ?? room.controller?.pos;
+  const builderLeadTime = builderTargetPos
+    ? replacementLeadTime(
+        planBody("builder", room.energyCapacityAvailable).length,
+        chebyshevDistance(spawn.pos, builderTargetPos)
+      )
+    : 0;
+
+  const preSpawnLeadTimeByRole: Partial<Record<CreepRole, number>> = {
+    upgrader: upgraderLeadTime,
+    builder: builderLeadTime
+  };
+
   for (const name in Game.creeps) {
     const creep = Game.creeps[name];
     if (creep.room.name !== room.name) continue;
 
-    if (creep.memory.role === "upgrader" && isNearingDeath(creep.ticksToLive, upgraderLeadTime)) {
-      // Nearing death - treat as already gone rather than counting it toward the target.
-    } else {
+    const leadTime = preSpawnLeadTimeByRole[creep.memory.role];
+    if (leadTime === undefined || !isNearingDeath(creep.ticksToLive, leadTime)) {
       creepCounts[creep.memory.role]++;
     }
 
