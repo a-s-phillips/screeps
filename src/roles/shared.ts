@@ -62,3 +62,10 @@ export function findAdjacentContainerWithCapacity(creep: Creep): StructureContai
   );
   return containers.find((container) => chebyshevDistance(creep.pos, container.pos) <= 1);
 }
+
+export function findContainerAtSource(source: Source): StructureContainer | undefined {
+  const containers = getCachedFind(source.room, FIND_STRUCTURES).filter(
+    (structure): structure is StructureContainer => structure.structureType === STRUCTURE_CONTAINER
+  );
+  return containers.find((container) => chebyshevDistance(source.pos, container.pos) <= 1);
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bodyCost, planBody } from "../../src/spawn/bodyPlanner";
+import { bodyCost, planBody, planMinerBody } from "../../src/spawn/bodyPlanner";
 
 describe("planBody", () => {
   it("returns an empty body when there isn't enough energy capacity for even one block", () => {
@@ -44,6 +44,28 @@ describe("planBody", () => {
     const body = planBody("harvester", 900);
 
     expect(body).toEqual([WORK, WORK, CARRY, MOVE, WORK, WORK, CARRY, MOVE]);
+  });
+});
+
+describe("planMinerBody", () => {
+  it("returns an empty body when there isn't enough energy for even one WORK + MOVE", () => {
+    expect(planMinerBody(149)).toEqual([]);
+  });
+
+  it("returns the minimum viable body (1 WORK, 1 MOVE) at the minimum affordable capacity", () => {
+    expect(planMinerBody(150)).toEqual([WORK, MOVE]);
+  });
+
+  it("scales WORK parts up with capacity, always exactly 1 MOVE", () => {
+    expect(planMinerBody(250)).toEqual([WORK, WORK, MOVE]);
+  });
+
+  it("caps at the 5-WORK source-saturation limit even with unlimited capacity", () => {
+    // A source regenerates 3000/300 = 10 energy/tick; each WORK part harvests 2/tick,
+    // so 5 WORK parts fully saturates one source - the true ceiling this role exists
+    // to hit (unlike the shared-block harvester body, which under-saturates at 4).
+    expect(planMinerBody(550)).toEqual([WORK, WORK, WORK, WORK, WORK, MOVE]);
+    expect(planMinerBody(50_000)).toEqual([WORK, WORK, WORK, WORK, WORK, MOVE]);
   });
 });
 

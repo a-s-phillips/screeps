@@ -8,6 +8,7 @@ import { planRoom } from "./planning/roomPlanner";
 import { run as runBuilder } from "./roles/builder";
 import { run as runHarvester } from "./roles/harvester";
 import { run as runHauler } from "./roles/hauler";
+import { run as runMiner } from "./roles/miner";
 import { run as runUpgrader } from "./roles/upgrader";
 import { runSpawning } from "./spawn/spawnManager";
 import { getCachedFind, resetRoomCache } from "./utils/roomCache";
@@ -16,7 +17,8 @@ const roleRunners: Record<CreepRole, (creep: Creep) => void> = {
   harvester: runHarvester,
   upgrader: runUpgrader,
   builder: runBuilder,
-  hauler: runHauler
+  hauler: runHauler,
+  miner: runMiner
 };
 
 let seenHostileIds = new Set<string>();

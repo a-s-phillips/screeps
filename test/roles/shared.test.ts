@@ -3,6 +3,7 @@ import {
   decideWorkingState,
   deliverEnergy,
   findAdjacentContainerWithCapacity,
+  findContainerAtSource,
   harvestFromNearestSource,
   MOVE_OPTS,
   withdrawFromNearestContainer
@@ -201,10 +202,53 @@ describe("findAdjacentContainerWithCapacity", () => {
   });
 });
 
-function mockWithdrawCreep(overrides: {
-  containers?: { id: string; usedCapacity: number }[];
-  withdrawResult?: ScreepsReturnCode;
-} = {}) {
+function mockSource(
+  pos: { x: number; y: number },
+  containers: { pos: { x: number; y: number }; freeCapacity: number }[]
+) {
+  return {
+    pos,
+    room: {
+      name: "W1N1",
+      find: vi.fn().mockReturnValue(
+        containers.map((c) => ({
+          structureType: STRUCTURE_CONTAINER,
+          pos: c.pos,
+          store: { getFreeCapacity: () => c.freeCapacity }
+        }))
+      )
+    }
+  } as unknown as Source;
+}
+
+describe("findContainerAtSource", () => {
+  it("returns a container within range 1 of the source", () => {
+    const source = mockSource({ x: 25, y: 25 }, [{ pos: { x: 26, y: 25 }, freeCapacity: 0 }]);
+
+    const result = findContainerAtSource(source);
+
+    expect(result).toEqual(expect.objectContaining({ pos: { x: 26, y: 25 } }));
+  });
+
+  it("returns undefined when no container is within range 1", () => {
+    const source = mockSource({ x: 25, y: 25 }, [{ pos: { x: 27, y: 25 }, freeCapacity: 50 }]);
+
+    expect(findContainerAtSource(source)).toBeUndefined();
+  });
+
+  it("returns a full container, unlike findAdjacentContainerWithCapacity", () => {
+    const source = mockSource({ x: 25, y: 25 }, [{ pos: { x: 26, y: 25 }, freeCapacity: 0 }]);
+
+    expect(findContainerAtSource(source)).not.toBeUndefined();
+  });
+});
+
+function mockWithdrawCreep(
+  overrides: {
+    containers?: { id: string; usedCapacity: number }[];
+    withdrawResult?: ScreepsReturnCode;
+  } = {}
+) {
   const containers = overrides.containers ?? [{ id: "container1", usedCapacity: 50 }];
   const targets = containers.map((c) => ({
     id: c.id,
