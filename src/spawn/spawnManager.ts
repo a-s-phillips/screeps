@@ -155,9 +155,12 @@ function recycleSurplusHarvesters(
 export function runSpawning(spawn: StructureSpawn, room: Room): void {
   if (spawn.spawning) return;
 
-  // scout/reserver/remoteHarvester are remote-only roles, tracked separately by the
-  // remote spawn pass (their memory.remoteRoom, not creep.room, is what matters for
-  // counting them) - present here at 0 only to satisfy Record<CreepRole, number>.
+  // scout/reserver/remoteHarvester/remoteHauler are remote-only roles, tracked
+  // separately by the remote spawn pass (their memory.remoteRoom, not creep.room, is
+  // what matters for counting them) - present here at 0 only to satisfy
+  // Record<CreepRole, number>. A remote miner is also excluded from this room's own
+  // count naturally, since it physically sits in the remote room (creep.room.name !==
+  // room.name below).
   const creepCounts: Record<CreepRole, number> = {
     harvester: 0,
     upgrader: 0,
@@ -166,7 +169,8 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     miner: 0,
     scout: 0,
     reserver: 0,
-    remoteHarvester: 0
+    remoteHarvester: 0,
+    remoteHauler: 0
   };
   const harvesterCreeps: Creep[] = [];
   // Tracks the healthiest (highest ticksToLive) miner currently assigned to each

@@ -1,10 +1,8 @@
 import { getRemoteCandidates, isRoomHostile, resolveRemoteRoom } from "../planning/remoteTargeting";
-import { bodyCost, planBody, planReserverBody, planScoutBody } from "./bodyPlanner";
+import { chebyshevDistance } from "../utils/grid";
+import { getCachedFind } from "../utils/roomCache";
+import { bodyCost, planBody, planMinerBody, planReserverBody, planScoutBody } from "./bodyPlanner";
 import { SpawnDecision } from "./spawnDecision";
-
-// Flat target, not scaled per source count in v1 - reasonable for the 1-2 source remote
-// rooms this feature targets; revisit once the container/miner/hauler split (v2) lands.
-const REMOTE_HARVESTER_TARGET = 2;
 
 // One scout at a time is plenty - scouts are 50E and this naturally rate-limits against
 // local spawning, converging to "every candidate scouted" over a few spawn cycles.
@@ -33,8 +31,46 @@ export interface RemoteRoomState {
   hostileRecentlySeen: boolean;
   reserverCount: number;
   remoteHarvesterCount: number;
+  remoteHaulerCount: number;
+  sourcesWithoutContainerCount: number;
+  sourcesNeedingMiner: Id<Source>[];
+  remoteContainerCount: number;
   energyAvailable: number;
   energyCapacityAvailable: number;
+}
+
+// Sources/containers require live vision into the remote room (only present while the
+// permanently-stationed reserver, or another remote creep, is actually there) - defaults
+// to 0/empty when it isn't, same as spawnManager.ts's own "guard against missing
+// visibility" convention. The reserver-first priority in decideNextRemoteSpawn already
+// re-establishes vision on its own during the rare gap, so this never gets stuck.
+function buildRemoteSourceState(
+  remoteRoomName: string,
+  minerSourceIds: Set<Id<Source>>
+): {
+  sourcesWithoutContainerCount: number;
+  sourcesNeedingMiner: Id<Source>[];
+  remoteContainerCount: number;
+} {
+  const remoteRoom = Game.rooms[remoteRoomName];
+  if (!remoteRoom) {
+    return { sourcesWithoutContainerCount: 0, sourcesNeedingMiner: [], remoteContainerCount: 0 };
+  }
+
+  const sources = getCachedFind(remoteRoom, FIND_SOURCES);
+  const containers = getCachedFind(remoteRoom, FIND_STRUCTURES).filter(
+    (structure): structure is StructureContainer => structure.structureType === STRUCTURE_CONTAINER
+  );
+  const containerAtSource = (source: Source) =>
+    containers.find((container) => chebyshevDistance(container.pos, source.pos) <= 1);
+
+  return {
+    sourcesWithoutContainerCount: sources.filter((source) => !containerAtSource(source)).length,
+    sourcesNeedingMiner: sources
+      .filter((source) => containerAtSource(source) && !minerSourceIds.has(source.id))
+      .map((source) => source.id),
+    remoteContainerCount: containers.length
+  };
 }
 
 export function buildRemoteRoomState(homeRoom: Room, remoteRoomName: string): RemoteRoomState {
@@ -42,11 +78,17 @@ export function buildRemoteRoomState(homeRoom: Room, remoteRoomName: string): Re
 
   let reserverCount = 0;
   let remoteHarvesterCount = 0;
+  let remoteHaulerCount = 0;
+  const minerSourceIds = new Set<Id<Source>>();
   for (const name in Game.creeps) {
     const creep = Game.creeps[name];
     if (creep.memory.remoteRoom !== remoteRoomName) continue;
     if (creep.memory.role === "reserver") reserverCount++;
     if (creep.memory.role === "remoteHarvester") remoteHarvesterCount++;
+    if (creep.memory.role === "remoteHauler") remoteHaulerCount++;
+    if (creep.memory.role === "miner" && creep.memory.sourceId) {
+      minerSourceIds.add(creep.memory.sourceId);
+    }
   }
 
   return {
@@ -55,14 +97,23 @@ export function buildRemoteRoomState(homeRoom: Room, remoteRoomName: string): Re
     hostileRecentlySeen: isRoomHostile(lastHostileSeenTick, Game.time),
     reserverCount,
     remoteHarvesterCount,
+    remoteHaulerCount,
+    ...buildRemoteSourceState(remoteRoomName, minerSourceIds),
     energyAvailable: homeRoom.energyAvailable,
     energyCapacityAvailable: homeRoom.energyCapacityAvailable
   };
 }
 
-// A reserver first (keeps the room reserved to us, plausibly raises source capacity),
-// then remoteHarvesters up to a flat target. Existing workers already out there are
-// accepted collateral risk in v1 - hostileRecentlySeen only pauses *new* spawns.
+// Mirrors spawnManager.ts's own local priority: a reserver first (keeps the room
+// reserved to us, and is the thing that establishes vision in the first place), then a
+// miner for any source that already has a container but no miner - a real economy
+// upgrade, worth pre-empting the round-robin below for the same reason local mining
+// checks sourcesNeedingMiner before its own round-robin. Only once both of those are
+// satisfied does a bootstrap remoteHarvester (for a still-uncontained source) or a
+// remoteHauler (one per built container, same 1:1 heuristic as local's hauler target)
+// get a turn. Existing workers already out there are accepted collateral risk -
+// hostileRecentlySeen only pauses *new* spawns (see roles/shared.ts's
+// retreatFromHostileRemote for what happens to creeps already assigned).
 export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | null {
   if (state.hostileRecentlySeen) return null;
 
@@ -78,11 +129,37 @@ export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | n
     return null;
   }
 
-  if (state.remoteHarvesterCount < REMOTE_HARVESTER_TARGET) {
-    const body = planBody("remoteHarvester", state.energyCapacityAvailable);
+  if (state.sourcesNeedingMiner.length > 0) {
+    const body = planMinerBody(state.energyCapacityAvailable);
     if (body.length > 0 && bodyCost(body) <= state.energyAvailable) {
       return {
-        role: "remoteHarvester",
+        role: "miner",
+        body,
+        memory: {
+          sourceId: state.sourcesNeedingMiner[0],
+          homeRoom: state.homeRoomName,
+          remoteRoom: state.remoteRoomName
+        }
+      };
+    }
+  }
+
+  const targets: { role: "remoteHarvester" | "remoteHauler"; count: number; target: number }[] = [
+    {
+      role: "remoteHarvester",
+      count: state.remoteHarvesterCount,
+      target: state.sourcesWithoutContainerCount
+    },
+    { role: "remoteHauler", count: state.remoteHaulerCount, target: state.remoteContainerCount }
+  ];
+
+  for (const { role, count, target } of targets) {
+    if (count >= target) continue;
+
+    const body = planBody(role, state.energyCapacityAvailable);
+    if (body.length > 0 && bodyCost(body) <= state.energyAvailable) {
+      return {
+        role,
         body,
         memory: { homeRoom: state.homeRoomName, remoteRoom: state.remoteRoomName }
       };

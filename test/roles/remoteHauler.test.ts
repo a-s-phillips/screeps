@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { run } from "../../src/roles/remoteHarvester";
+import { run } from "../../src/roles/remoteHauler";
 import { REMOTE_MOVE_OPTS } from "../../src/roles/shared";
 import { resetRoomCache } from "../../src/utils/roomCache";
 
-const source = { id: "source1" };
+const container = {
+  id: "container1",
+  structureType: STRUCTURE_CONTAINER,
+  store: { getUsedCapacity: () => 100 }
+};
 const spawn = { id: "spawn1", structureType: STRUCTURE_SPAWN };
 
 function mockCreep(opts: {
@@ -13,24 +17,21 @@ function mockCreep(opts: {
   roomName: string;
   homeRoom?: string;
   remoteRoom?: string;
-  containerSites?: { id: string; structureType: string }[];
 }) {
-  const containerSites = opts.containerSites ?? [];
   const room = {
     name: opts.roomName,
     find: vi.fn((type: FindConstant) => {
-      if (type === FIND_SOURCES_ACTIVE) return [source];
+      if (type === FIND_STRUCTURES) return [container];
       if (type === FIND_MY_STRUCTURES) {
         return [{ ...spawn, store: { getFreeCapacity: () => 100 } }];
       }
-      if (type === FIND_CONSTRUCTION_SITES) return containerSites;
       return [];
     })
   };
 
   return {
     memory: {
-      role: "remoteHarvester",
+      role: "remoteHauler",
       working: opts.working,
       homeRoom: opts.homeRoom,
       remoteRoom: opts.remoteRoom
@@ -41,14 +42,13 @@ function mockCreep(opts: {
       getUsedCapacity: vi.fn().mockReturnValue(opts.usedEnergy),
       getFreeCapacity: vi.fn().mockReturnValue(opts.freeCapacity)
     },
-    harvest: vi.fn().mockReturnValue(OK),
+    withdraw: vi.fn().mockReturnValue(OK),
     transfer: vi.fn().mockReturnValue(OK),
-    build: vi.fn().mockReturnValue(OK),
     moveTo: vi.fn()
   } as unknown as Creep;
 }
 
-describe("remoteHarvester role", () => {
+describe("remoteHauler role", () => {
   beforeEach(() => {
     resetRoomCache();
   });
@@ -57,7 +57,7 @@ describe("remoteHarvester role", () => {
     vi.unstubAllGlobals();
   });
 
-  it("retreats home instead of harvesting when the remote room has a recent hostile sighting", () => {
+  it("retreats home instead of withdrawing when the remote room has a recent hostile sighting", () => {
     vi.stubGlobal("Game", { time: 1000 });
     vi.stubGlobal("Memory", { rooms: { W2N1: { lastHostileSeenTick: 950 } } });
     const creep = mockCreep({
@@ -75,7 +75,7 @@ describe("remoteHarvester role", () => {
       expect.objectContaining({ roomName: "W1N1" }),
       REMOTE_MOVE_OPTS
     );
-    expect(creep.harvest).not.toHaveBeenCalled();
+    expect(creep.withdraw).not.toHaveBeenCalled();
   });
 
   it("keeps delivering toward home even when the remote room has a recent hostile sighting", () => {
@@ -105,10 +105,10 @@ describe("remoteHarvester role", () => {
     run(creep);
 
     expect(creep.moveTo).not.toHaveBeenCalled();
-    expect(creep.harvest).not.toHaveBeenCalled();
+    expect(creep.withdraw).not.toHaveBeenCalled();
   });
 
-  it("travels to the remote room before harvesting", () => {
+  it("travels to the remote room before withdrawing", () => {
     const creep = mockCreep({
       working: true,
       usedEnergy: 0,
@@ -123,10 +123,10 @@ describe("remoteHarvester role", () => {
       expect.objectContaining({ roomName: "W2N1" }),
       REMOTE_MOVE_OPTS
     );
-    expect(creep.harvest).not.toHaveBeenCalled();
+    expect(creep.withdraw).not.toHaveBeenCalled();
   });
 
-  it("harvests the nearest active source once in the remote room", () => {
+  it("withdraws from the fullest container once in the remote room", () => {
     const creep = mockCreep({
       working: true,
       usedEnergy: 0,
@@ -137,23 +137,10 @@ describe("remoteHarvester role", () => {
 
     run(creep);
 
-    expect(creep.harvest).toHaveBeenCalledWith(source);
-  });
-
-  it("builds the pending container site at its source while still harvesting", () => {
-    const creep = mockCreep({
-      working: true,
-      usedEnergy: 0,
-      freeCapacity: 50,
-      roomName: "W2N1",
-      remoteRoom: "W2N1",
-      containerSites: [{ id: "site1", structureType: STRUCTURE_CONTAINER }]
-    });
-
-    run(creep);
-
-    expect(creep.build).toHaveBeenCalledWith(expect.objectContaining({ id: "site1" }));
-    expect(creep.harvest).toHaveBeenCalledWith(source);
+    expect(creep.withdraw).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "container1" }),
+      RESOURCE_ENERGY
+    );
   });
 
   it("does nothing while delivering if no home room is assigned", () => {

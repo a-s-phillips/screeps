@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  buildNearestContainerSite,
   decideWorkingState,
   deliverEnergy,
   findAdjacentContainerWithCapacity,
@@ -16,6 +17,62 @@ import { resetRoomCache } from "../../src/utils/roomCache";
 
 beforeEach(() => {
   resetRoomCache();
+});
+
+describe("buildNearestContainerSite", () => {
+  function mockCreep(opts: {
+    sites?: { id: string; structureType: string; pos?: { x: number; y: number } }[];
+    buildResult?: ScreepsReturnCode;
+  }) {
+    const sites = opts.sites ?? [{ id: "site1", structureType: STRUCTURE_CONTAINER }];
+
+    return {
+      room: {
+        find: vi.fn().mockReturnValue(sites)
+      },
+      pos: {
+        findClosestByPath: vi.fn((candidates: unknown[]) => candidates[0] ?? null)
+      },
+      build: vi.fn().mockReturnValue(opts.buildResult ?? OK),
+      moveTo: vi.fn()
+    } as unknown as Creep;
+  }
+
+  it("returns false when there is no pending container site", () => {
+    const creep = mockCreep({ sites: [] });
+
+    const acted = buildNearestContainerSite(creep);
+
+    expect(acted).toBe(false);
+    expect(creep.build).not.toHaveBeenCalled();
+  });
+
+  it("ignores a non-container construction site", () => {
+    const creep = mockCreep({ sites: [{ id: "site1", structureType: STRUCTURE_EXTENSION }] });
+
+    const acted = buildNearestContainerSite(creep);
+
+    expect(acted).toBe(false);
+    expect(creep.build).not.toHaveBeenCalled();
+  });
+
+  it("builds the nearest pending container site", () => {
+    const creep = mockCreep({});
+
+    const acted = buildNearestContainerSite(creep);
+
+    expect(acted).toBe(true);
+    expect(creep.build).toHaveBeenCalledWith(expect.objectContaining({ id: "site1" }));
+    expect(creep.moveTo).not.toHaveBeenCalled();
+  });
+
+  it("moves toward the site when out of build range", () => {
+    const creep = mockCreep({ buildResult: ERR_NOT_IN_RANGE });
+
+    buildNearestContainerSite(creep);
+
+    expect(creep.moveTo).toHaveBeenCalledWith(expect.objectContaining({ id: "site1" }), MOVE_OPTS);
+  });
 });
 
 describe("retreatFromHostileRemote", () => {

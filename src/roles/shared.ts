@@ -151,6 +151,24 @@ export function gatherEnergy(creep: Creep): void {
   }
 }
 
+// Scoped narrowly to "build the pending container site in my current room" - unlike
+// builder.ts's own container-priority logic, this doesn't fall back to other site types
+// or the controller, since callers (remoteHarvester) have their own separate job
+// (harvesting) to fall back to instead.
+export function buildNearestContainerSite(creep: Creep): boolean {
+  const sites = getCachedFind(creep.room, FIND_CONSTRUCTION_SITES).filter(
+    (site): site is ConstructionSite<STRUCTURE_CONTAINER> =>
+      site.structureType === STRUCTURE_CONTAINER
+  );
+  const site = creep.pos.findClosestByPath(sites);
+  if (!site) return false;
+
+  if (creep.build(site) === ERR_NOT_IN_RANGE) {
+    creep.moveTo(site, MOVE_OPTS);
+  }
+  return true;
+}
+
 export function findAdjacentContainerWithCapacity(creep: Creep): StructureContainer | undefined {
   const containers = getCachedFind(creep.room, FIND_STRUCTURES).filter(
     (structure): structure is StructureContainer =>

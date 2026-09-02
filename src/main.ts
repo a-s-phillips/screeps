@@ -11,6 +11,7 @@ import { run as runHarvester } from "./roles/harvester";
 import { run as runHauler } from "./roles/hauler";
 import { run as runMiner } from "./roles/miner";
 import { run as runRemoteHarvester } from "./roles/remoteHarvester";
+import { run as runRemoteHauler } from "./roles/remoteHauler";
 import { run as runReserver } from "./roles/reserver";
 import { run as runScout } from "./roles/scout";
 import { run as runUpgrader } from "./roles/upgrader";
@@ -26,7 +27,8 @@ const roleRunners: Record<CreepRole, (creep: Creep) => void> = {
   miner: runMiner,
   scout: runScout,
   reserver: runReserver,
-  remoteHarvester: runRemoteHarvester
+  remoteHarvester: runRemoteHarvester,
+  remoteHauler: runRemoteHauler
 };
 
 let seenHostileIds = new Set<string>();

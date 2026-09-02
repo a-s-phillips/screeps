@@ -1,10 +1,9 @@
 import {
-  buildNearestContainerSite,
   decideWorkingState,
   deliverEnergy,
-  harvestFromNearestSource,
   retreatFromHostileRemote,
-  travelToRoom
+  travelToRoom,
+  withdrawFromFullestContainer
 } from "./shared";
 
 export function run(creep: Creep): void {
@@ -21,11 +20,7 @@ export function run(creep: Creep): void {
 
     if (!travelToRoom(creep, remoteRoom)) return;
 
-    // No dedicated remote-builder role exists (see remoteSpawnManager.ts) - this bootstrap
-    // creep is already there with the right body parts, so it finishes its own source's
-    // pending container itself before handing off to a miner + remoteHauler.
-    buildNearestContainerSite(creep);
-    harvestFromNearestSource(creep);
+    withdrawFromFullestContainer(creep);
     return;
   }
 

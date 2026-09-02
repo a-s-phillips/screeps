@@ -90,7 +90,7 @@ describe("decideRemoteSpawn", () => {
   });
 
   it("spawns a reserver once a remote room is resolved but has none yet", () => {
-    vi.stubGlobal("Game", { map: { describeExits: vi.fn() }, creeps: {} });
+    vi.stubGlobal("Game", { map: { describeExits: vi.fn() }, creeps: {}, rooms: {} });
     vi.stubGlobal("Memory", { rooms: { W9N8: { remoteRoom: "W8N8" } } });
 
     const decision = decideRemoteSpawn(mockRoom("W9N8"));
@@ -127,7 +127,8 @@ describe("decideRemoteSpawn", () => {
     };
     vi.stubGlobal("Game", {
       map: { describeExits: vi.fn().mockReturnValue({ "1": "W9N9" }) },
-      creeps: {}
+      creeps: {},
+      rooms: {}
     });
     vi.stubGlobal("Memory", { rooms });
 
@@ -145,6 +146,10 @@ function baseRemoteState(overrides: Partial<RemoteRoomState> = {}): RemoteRoomSt
     hostileRecentlySeen: false,
     reserverCount: 0,
     remoteHarvesterCount: 0,
+    remoteHaulerCount: 0,
+    sourcesWithoutContainerCount: 0,
+    sourcesNeedingMiner: [],
+    remoteContainerCount: 0,
     energyAvailable: 1000,
     energyCapacityAvailable: 1000,
     ...overrides
@@ -160,16 +165,49 @@ describe("decideNextRemoteSpawn", () => {
     expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W8N8" });
   });
 
-  it("spawns a remoteHarvester once a reserver exists and the target isn't met", () => {
-    const decision = decideNextRemoteSpawn(baseRemoteState({ reserverCount: 1 }));
+  it("spawns a miner for a source that has a container but no miner, ahead of harvester/hauler needs", () => {
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        sourcesNeedingMiner: ["source1" as Id<Source>],
+        sourcesWithoutContainerCount: 1,
+        remoteContainerCount: 1
+      })
+    );
+
+    expect(decision?.role).toBe("miner");
+    expect(decision?.memory).toEqual({
+      sourceId: "source1",
+      homeRoom: "W9N8",
+      remoteRoom: "W8N8"
+    });
+  });
+
+  it("spawns a remoteHarvester for an uncontained source once the reserver and miner needs are met", () => {
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, sourcesWithoutContainerCount: 1 })
+    );
 
     expect(decision?.role).toBe("remoteHarvester");
     expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W8N8" });
   });
 
-  it("returns null once the reserver and remoteHarvester targets are both met", () => {
+  it("spawns a remoteHauler once a container exists and the hauler target isn't met", () => {
     const decision = decideNextRemoteSpawn(
-      baseRemoteState({ reserverCount: 1, remoteHarvesterCount: 2 })
+      baseRemoteState({ reserverCount: 1, remoteContainerCount: 1 })
+    );
+
+    expect(decision?.role).toBe("remoteHauler");
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W8N8" });
+  });
+
+  it("returns null once every target is met", () => {
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        remoteContainerCount: 1,
+        remoteHaulerCount: 1
+      })
     );
 
     expect(decision).toBeNull();
@@ -186,20 +224,55 @@ describe("decideNextRemoteSpawn", () => {
 
     expect(decision).toBeNull();
   });
+
+  it("falls through to the round-robin when the miner body is unaffordable", () => {
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        sourcesNeedingMiner: ["source1" as Id<Source>],
+        energyAvailable: 100
+      })
+    );
+
+    expect(decision).toBeNull();
+  });
 });
+
+function mockVisibleRemoteRoom(opts: {
+  name: string;
+  sources?: { id: string; pos: { x: number; y: number } }[];
+  containers?: { id: string; pos: { x: number; y: number } }[];
+}) {
+  const sources = opts.sources ?? [];
+  const containers = (opts.containers ?? []).map((c) => ({
+    ...c,
+    structureType: STRUCTURE_CONTAINER
+  }));
+
+  return {
+    name: opts.name,
+    find: vi.fn((type: FindConstant) => {
+      if (type === FIND_SOURCES) return sources;
+      if (type === FIND_STRUCTURES) return containers;
+      return [];
+    })
+  };
+}
 
 describe("buildRemoteRoomState", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("counts reservers and remoteHarvesters assigned to this specific remote room", () => {
+  it("counts reservers, remoteHarvesters, and remoteHaulers assigned to this specific remote room", () => {
     vi.stubGlobal("Game", {
       time: 1000,
+      rooms: {},
       creeps: {
         r1: { memory: { role: "reserver", remoteRoom: "W8N8" } },
         rh1: { memory: { role: "remoteHarvester", remoteRoom: "W8N8" } },
         rh2: { memory: { role: "remoteHarvester", remoteRoom: "W9N7" } },
+        rl1: { memory: { role: "remoteHauler", remoteRoom: "W8N8" } },
         s1: { memory: { role: "scout", remoteRoom: "W8N8" } }
       }
     });
@@ -209,10 +282,11 @@ describe("buildRemoteRoomState", () => {
 
     expect(state.reserverCount).toBe(1);
     expect(state.remoteHarvesterCount).toBe(1);
+    expect(state.remoteHaulerCount).toBe(1);
   });
 
   it("reports a recently-seen hostile within the remote-room recency window", () => {
-    vi.stubGlobal("Game", { time: 1000, creeps: {} });
+    vi.stubGlobal("Game", { time: 1000, creeps: {}, rooms: {} });
     vi.stubGlobal("Memory", { rooms: { W8N8: { lastHostileSeenTick: 950 } } });
 
     const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
@@ -221,11 +295,63 @@ describe("buildRemoteRoomState", () => {
   });
 
   it("does not report a hostile seen long ago as recent", () => {
-    vi.stubGlobal("Game", { time: 5000, creeps: {} });
+    vi.stubGlobal("Game", { time: 5000, creeps: {}, rooms: {} });
     vi.stubGlobal("Memory", { rooms: { W8N8: { lastHostileSeenTick: 100 } } });
 
     const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
 
     expect(state.hostileRecentlySeen).toBe(false);
+  });
+
+  it("computes sourcesWithoutContainerCount, sourcesNeedingMiner, and remoteContainerCount from live vision", () => {
+    const remoteRoom = mockVisibleRemoteRoom({
+      name: "W8N8",
+      sources: [
+        { id: "sourceWithContainer", pos: { x: 10, y: 10 } },
+        { id: "sourceWithoutContainer", pos: { x: 30, y: 30 } }
+      ],
+      containers: [{ id: "container1", pos: { x: 11, y: 10 } }]
+    });
+    vi.stubGlobal("Game", { time: 1000, creeps: {}, rooms: { W8N8: remoteRoom } });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.sourcesWithoutContainerCount).toBe(1);
+    expect(state.sourcesNeedingMiner).toEqual(["sourceWithContainer"]);
+    expect(state.remoteContainerCount).toBe(1);
+  });
+
+  it("excludes a source from sourcesNeedingMiner once a miner is already assigned to it", () => {
+    const remoteRoom = mockVisibleRemoteRoom({
+      name: "W8N8",
+      sources: [{ id: "sourceWithContainer", pos: { x: 10, y: 10 } }],
+      containers: [{ id: "container1", pos: { x: 11, y: 10 } }]
+    });
+    vi.stubGlobal("Game", {
+      time: 1000,
+      rooms: { W8N8: remoteRoom },
+      creeps: {
+        m1: {
+          memory: { role: "miner", remoteRoom: "W8N8", sourceId: "sourceWithContainer" }
+        }
+      }
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.sourcesNeedingMiner).toEqual([]);
+  });
+
+  it("defaults remote-room-derived fields to zero when the remote room isn't currently visible", () => {
+    vi.stubGlobal("Game", { time: 1000, creeps: {}, rooms: {} });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.sourcesWithoutContainerCount).toBe(0);
+    expect(state.sourcesNeedingMiner).toEqual([]);
+    expect(state.remoteContainerCount).toBe(0);
   });
 });
