@@ -3,6 +3,10 @@ import { chebyshevDistance } from "../utils/grid";
 import { getCachedFind } from "../utils/roomCache";
 import { bodyCost, planBody, planMinerBody } from "./bodyPlanner";
 import { isNearingDeath, replacementLeadTime } from "./preSpawn";
+import { decideRemoteSpawn } from "./remoteSpawnManager";
+import { SpawnDecision } from "./spawnDecision";
+
+export type { SpawnDecision };
 
 export interface RoomState {
   creepCounts: Record<CreepRole, number>;
@@ -13,12 +17,6 @@ export interface RoomState {
   energyAvailable: number;
   energyCapacityAvailable: number;
   controllerLevel: number;
-}
-
-interface SpawnDecision {
-  role: CreepRole;
-  body: BodyPartConstant[];
-  memory?: Partial<CreepMemory>;
 }
 
 // A source with a built container gets a miner instead (see planMinerBody) - it hits
@@ -45,6 +43,28 @@ const BUILDER_TARGET_CAP = 3;
 
 function builderTargetFor(state: RoomState): number {
   return Math.min(state.constructionSiteCount, BUILDER_TARGET_CAP);
+}
+
+// Shared by decideNextSpawn and hasUnmetLocalNeed so the two can't drift out of sync -
+// sizing capacity is deliberately left out here, since "is anything under target"
+// doesn't depend on what body size would be affordable for it.
+function buildRoleTargets(
+  state: RoomState
+): { role: "harvester" | "hauler" | "upgrader" | "builder"; target: number }[] {
+  return [
+    { role: "harvester", target: harvesterTargetFor(state) },
+    { role: "hauler", target: state.containerCount },
+    { role: "upgrader", target: upgraderTargetFor(state) },
+    { role: "builder", target: builderTargetFor(state) }
+  ];
+}
+
+// "Fully staffed" and "something's needed but unaffordable at the ideal body size right
+// now" both make decideNextSpawn return null - conflating them would let remote spawning
+// spend energy the home room was just deemed too poor to spend on its own unmet need.
+export function hasUnmetLocalNeed(state: RoomState): boolean {
+  if (state.sourcesNeedingMiner.length > 0) return true;
+  return buildRoleTargets(state).some(({ role, target }) => state.creepCounts[role] < target);
 }
 
 export function decideNextSpawn(state: RoomState): SpawnDecision | null {
@@ -86,38 +106,13 @@ export function decideNextSpawn(state: RoomState): SpawnDecision | null {
       : Math.min(state.energyCapacityAvailable, state.energyAvailable);
   }
 
-  const harvesterTarget = harvesterTargetFor(state);
-  const haulerTarget = state.containerCount;
-
-  const targets: {
-    role: "harvester" | "hauler" | "upgrader" | "builder";
-    target: number;
-    sizingCapacity: number;
-  }[] = [
-    {
-      role: "harvester",
-      target: harvesterTarget,
-      sizingCapacity: feederSizingCapacity("harvester", harvesterTarget)
-    },
-    {
-      role: "hauler",
-      target: haulerTarget,
-      sizingCapacity: feederSizingCapacity("hauler", haulerTarget)
-    },
-    {
-      role: "upgrader",
-      target: upgraderTargetFor(state),
-      sizingCapacity: state.energyCapacityAvailable
-    },
-    {
-      role: "builder",
-      target: builderTargetFor(state),
-      sizingCapacity: state.energyCapacityAvailable
-    }
-  ];
-
-  for (const { role, target, sizingCapacity } of targets) {
+  for (const { role, target } of buildRoleTargets(state)) {
     if (state.creepCounts[role] >= target) continue;
+
+    const sizingCapacity =
+      role === "harvester" || role === "hauler"
+        ? feederSizingCapacity(role, target)
+        : state.energyCapacityAvailable;
 
     const body = planBody(role, sizingCapacity);
     if (body.length > 0 && bodyCost(body) <= state.energyAvailable) return { role, body };
@@ -274,7 +269,8 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     recycleSurplusHarvesters(spawn, harvesterCreeps, excessHarvesters);
   }
 
-  const decision = decideNextSpawn(state);
+  const decision =
+    decideNextSpawn(state) ?? (hasUnmetLocalNeed(state) ? null : decideRemoteSpawn(room));
   if (!decision) return;
 
   const name = `${decision.role}_${Game.time}`;

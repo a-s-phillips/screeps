@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { decideNextSpawn, runSpawning, RoomState } from "../../src/spawn/spawnManager";
+import {
+  decideNextSpawn,
+  hasUnmetLocalNeed,
+  runSpawning,
+  RoomState
+} from "../../src/spawn/spawnManager";
 import { resetRoomCache } from "../../src/utils/roomCache";
 import { chebyshevDistance } from "../../src/utils/grid";
 import * as logger from "../../src/logging/logger";
@@ -299,10 +304,43 @@ describe("decideNextSpawn", () => {
   });
 });
 
+describe("hasUnmetLocalNeed", () => {
+  it("is true when a source needs a miner", () => {
+    const state = baseState({ sourcesNeedingMiner: ["source1" as Id<Source>] });
+
+    expect(hasUnmetLocalNeed(state)).toBe(true);
+  });
+
+  it("is true when a role is under its target, regardless of affordability", () => {
+    // baseState's default (energyAvailable === energyCapacityAvailable === 300) can't
+    // even afford the cheapest role's ideal body at some targets - hasUnmetLocalNeed
+    // must still report true, unlike decideNextSpawn returning null in that case.
+    const state = baseState({
+      creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 0, miner: 0 }
+    });
+
+    expect(hasUnmetLocalNeed(state)).toBe(true);
+  });
+
+  it("is false once every role is at or above target and no source needs a miner", () => {
+    const state = baseState({
+      sourcesWithoutContainerCount: 0,
+      creepCounts: { harvester: 0, upgrader: 2, builder: 0, hauler: 0, miner: 0 }
+    });
+
+    expect(hasUnmetLocalNeed(state)).toBe(false);
+  });
+});
+
 describe("runSpawning", () => {
   beforeEach(() => {
     resetRoomCache();
-    vi.stubGlobal("Game", { creeps: {}, time: 12345 });
+    vi.stubGlobal("Game", {
+      creeps: {},
+      time: 12345,
+      map: { describeExits: vi.fn().mockReturnValue({}) }
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
     vi.mocked(logger.log).mockClear();
   });
 
@@ -405,6 +443,10 @@ describe("runSpawning", () => {
   it("counts existing creeps in the room toward their role targets", () => {
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
         h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } }
@@ -422,6 +464,10 @@ describe("runSpawning", () => {
   it("does not spawn when no role is under target", () => {
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
         h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
@@ -439,6 +485,10 @@ describe("runSpawning", () => {
   it("spawns a hauler once the harvester target is met and a container exists", () => {
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
         h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } }
@@ -466,6 +516,10 @@ describe("runSpawning", () => {
   it("does not spawn a second miner for a source that already has one assigned", () => {
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         m1: {
           room: { name: "W1N1" },
@@ -492,6 +546,10 @@ describe("runSpawning", () => {
     // though one is technically still assigned.
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         m1: {
           room: { name: "W1N1" },
@@ -513,6 +571,10 @@ describe("runSpawning", () => {
     // Same setup as above (lead time 19), but ticksToLive 25 is comfortably above it.
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         m1: {
           room: { name: "W1N1" },
@@ -535,6 +597,10 @@ describe("runSpawning", () => {
   it("recycles surplus harvesters, oldest (lowest ticksToLive) first, once their source has a miner covering it", () => {
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         h1: {
           room: { name: "W1N1" },
@@ -568,6 +634,10 @@ describe("runSpawning", () => {
   it("does not recycle a surplus harvester that's too far from the spawn this tick", () => {
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         h1: {
           room: { name: "W1N1" },
@@ -587,6 +657,10 @@ describe("runSpawning", () => {
   it("wires the room's actual controller level into the upgrader target", () => {
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
         h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
@@ -613,6 +687,10 @@ describe("runSpawning", () => {
     // upgrader shouldn't count toward the RCL1 target of 2 - leaving room for a 3rd.
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
         h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
@@ -637,6 +715,10 @@ describe("runSpawning", () => {
     // Same setup (lead time 34), but ticksToLive 100 is well above it.
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
         h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
@@ -662,6 +744,10 @@ describe("runSpawning", () => {
     // builder shouldn't count toward the (1-site) target of 1 - leaving room for a 2nd.
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
         h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
@@ -687,6 +773,10 @@ describe("runSpawning", () => {
     // Same setup (lead time 24), but ticksToLive 100 is well above it.
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
         h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
@@ -714,6 +804,10 @@ describe("runSpawning", () => {
     // 2nd.
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
         h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
@@ -739,6 +833,10 @@ describe("runSpawning", () => {
     // Same setup (lead time 58), but ticksToLive 100 is well above it.
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
         h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
@@ -761,6 +859,10 @@ describe("runSpawning", () => {
   it("does not recycle harvesters when the count is at or below target", () => {
     vi.stubGlobal("Game", {
       time: 12345,
+      // No remote-mining candidates by default - keeps these local-economy tests from
+      // reaching the remote spawn pass at all (which would otherwise need real
+      // Memory.rooms candidate entries to resolve against).
+      map: { describeExits: vi.fn().mockReturnValue({}) },
       creeps: {
         h1: {
           room: { name: "W1N1" },
