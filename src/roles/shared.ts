@@ -1,3 +1,4 @@
+import { isRoomHostile } from "../planning/remoteTargeting";
 import { chebyshevDistance } from "../utils/grid";
 import { getCachedFind } from "../utils/roomCache";
 
@@ -15,6 +16,22 @@ export function travelToRoom(creep: Creep, roomName: string): boolean {
 
   creep.moveTo(new RoomPosition(25, 25, roomName), REMOTE_MOVE_OPTS);
   return false;
+}
+
+// A remote room has no towers/ramparts to fall back on, so a reserver/remoteHarvester
+// already out there turns back home the moment its target room has a recent hostile
+// sighting, rather than walking into (or continuing to work in) danger - resumes
+// automatically once the sighting ages out of isRoomHostile's window, no extra state to
+// reset. Returns true when the creep is retreating, so callers can skip their normal
+// remote-room work for the tick.
+export function retreatFromHostileRemote(
+  creep: Creep,
+  remoteRoomName: string,
+  homeRoomName?: string
+): boolean {
+  if (!isRoomHostile(Memory.rooms[remoteRoomName]?.lastHostileSeenTick, Game.time)) return false;
+  if (homeRoomName) travelToRoom(creep, homeRoomName);
+  return true;
 }
 
 export function decideWorkingState(

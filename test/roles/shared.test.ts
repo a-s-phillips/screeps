@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   decideWorkingState,
   deliverEnergy,
@@ -8,6 +8,7 @@ import {
   harvestFromNearestSource,
   MOVE_OPTS,
   REMOTE_MOVE_OPTS,
+  retreatFromHostileRemote,
   travelToRoom,
   withdrawFromFullestContainer
 } from "../../src/roles/shared";
@@ -15,6 +16,55 @@ import { resetRoomCache } from "../../src/utils/roomCache";
 
 beforeEach(() => {
   resetRoomCache();
+});
+
+describe("retreatFromHostileRemote", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function mockRetreatingCreep(roomName = "W2N1") {
+    return {
+      room: { name: roomName },
+      moveTo: vi.fn()
+    } as unknown as Creep;
+  }
+
+  it("returns false and does not move when there is no recent sighting", () => {
+    vi.stubGlobal("Game", { time: 1000 });
+    vi.stubGlobal("Memory", { rooms: {} });
+    const creep = mockRetreatingCreep();
+
+    const retreated = retreatFromHostileRemote(creep, "W2N1", "W1N1");
+
+    expect(retreated).toBe(false);
+    expect(creep.moveTo).not.toHaveBeenCalled();
+  });
+
+  it("heads toward the home room on a recent sighting", () => {
+    vi.stubGlobal("Game", { time: 1000 });
+    vi.stubGlobal("Memory", { rooms: { W2N1: { lastHostileSeenTick: 950 } } });
+    const creep = mockRetreatingCreep();
+
+    const retreated = retreatFromHostileRemote(creep, "W2N1", "W1N1");
+
+    expect(retreated).toBe(true);
+    expect(creep.moveTo).toHaveBeenCalledWith(
+      expect.objectContaining({ roomName: "W1N1" }),
+      REMOTE_MOVE_OPTS
+    );
+  });
+
+  it("still reports true with no home room to head to, but does not move", () => {
+    vi.stubGlobal("Game", { time: 1000 });
+    vi.stubGlobal("Memory", { rooms: { W2N1: { lastHostileSeenTick: 950 } } });
+    const creep = mockRetreatingCreep();
+
+    const retreated = retreatFromHostileRemote(creep, "W2N1", undefined);
+
+    expect(retreated).toBe(true);
+    expect(creep.moveTo).not.toHaveBeenCalled();
+  });
 });
 
 describe("decideWorkingState", () => {

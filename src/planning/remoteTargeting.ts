@@ -1,5 +1,18 @@
 import { getCachedFind } from "../utils/roomCache";
 
+// A remote room has no towers/ramparts to fall back on (can't build them without owning
+// the room), so this same recency window gates both new remote spawns
+// (remoteSpawnManager) and recalling creeps already out there (roles/shared.ts) - kept
+// here as the single source of truth so the two can't drift apart on what "still
+// dangerous" means.
+export const REMOTE_HOSTILE_MEMORY_WINDOW = 200;
+
+export function isRoomHostile(lastHostileSeenTick: number | undefined, now: number): boolean {
+  return (
+    lastHostileSeenTick !== undefined && now - lastHostileSeenTick <= REMOTE_HOSTILE_MEMORY_WINDOW
+  );
+}
+
 // Static map exit topology - no vision required, works for a room the bot has never seen.
 export function getRemoteCandidates(homeRoomName: string): string[] {
   const exits = Game.map.describeExits(homeRoomName);

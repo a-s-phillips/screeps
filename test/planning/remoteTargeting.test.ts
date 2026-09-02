@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getRemoteCandidates,
+  isRoomHostile,
   pickBestCandidate,
   recordRemoteIntel,
+  REMOTE_HOSTILE_MEMORY_WINDOW,
   resolveRemoteRoom
 } from "../../src/planning/remoteTargeting";
 import { resetRoomCache } from "../../src/utils/roomCache";
@@ -182,6 +184,24 @@ function mockRoom(opts: {
     })
   } as unknown as Room;
 }
+
+describe("isRoomHostile", () => {
+  it("is false when no hostile has ever been seen", () => {
+    expect(isRoomHostile(undefined, 1000)).toBe(false);
+  });
+
+  it("is true right after a sighting", () => {
+    expect(isRoomHostile(1000, 1000)).toBe(true);
+  });
+
+  it("is true exactly at the window boundary", () => {
+    expect(isRoomHostile(1000, 1000 + REMOTE_HOSTILE_MEMORY_WINDOW)).toBe(true);
+  });
+
+  it("is false just past the window boundary", () => {
+    expect(isRoomHostile(1000, 1000 + REMOTE_HOSTILE_MEMORY_WINDOW + 1)).toBe(false);
+  });
+});
 
 describe("recordRemoteIntel", () => {
   beforeEach(() => {

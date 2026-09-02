@@ -2,6 +2,7 @@ import {
   decideWorkingState,
   deliverEnergy,
   harvestFromNearestSource,
+  retreatFromHostileRemote,
   travelToRoom
 } from "./shared";
 
@@ -13,7 +14,11 @@ export function run(creep: Creep): void {
 
   if (!working) {
     const remoteRoom = creep.memory.remoteRoom;
-    if (!remoteRoom || !travelToRoom(creep, remoteRoom)) return;
+    if (!remoteRoom) return;
+
+    if (retreatFromHostileRemote(creep, remoteRoom, creep.memory.homeRoom)) return;
+
+    if (!travelToRoom(creep, remoteRoom)) return;
 
     harvestFromNearestSource(creep);
     return;

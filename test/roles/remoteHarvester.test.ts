@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { run } from "../../src/roles/remoteHarvester";
 import { REMOTE_MOVE_OPTS } from "../../src/roles/shared";
 import { resetRoomCache } from "../../src/utils/roomCache";
@@ -47,6 +47,52 @@ function mockCreep(opts: {
 describe("remoteHarvester role", () => {
   beforeEach(() => {
     resetRoomCache();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("retreats home instead of harvesting when the remote room has a recent hostile sighting", () => {
+    vi.stubGlobal("Game", { time: 1000 });
+    vi.stubGlobal("Memory", { rooms: { W2N1: { lastHostileSeenTick: 950 } } });
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 0,
+      freeCapacity: 50,
+      roomName: "W2N1",
+      homeRoom: "W1N1",
+      remoteRoom: "W2N1"
+    });
+
+    run(creep);
+
+    expect(creep.moveTo).toHaveBeenCalledWith(
+      expect.objectContaining({ roomName: "W1N1" }),
+      REMOTE_MOVE_OPTS
+    );
+    expect(creep.harvest).not.toHaveBeenCalled();
+  });
+
+  it("keeps delivering toward home even when the remote room has a recent hostile sighting", () => {
+    vi.stubGlobal("Game", { time: 1000 });
+    vi.stubGlobal("Memory", { rooms: { W2N1: { lastHostileSeenTick: 950 } } });
+    const creep = mockCreep({
+      working: false,
+      usedEnergy: 50,
+      freeCapacity: 0,
+      roomName: "W2N1",
+      homeRoom: "W1N1",
+      remoteRoom: "W2N1"
+    });
+
+    run(creep);
+
+    expect(creep.moveTo).toHaveBeenCalledWith(
+      expect.objectContaining({ roomName: "W1N1" }),
+      REMOTE_MOVE_OPTS
+    );
+    expect(creep.transfer).not.toHaveBeenCalled();
   });
 
   it("does nothing while gathering if no remote room is assigned", () => {

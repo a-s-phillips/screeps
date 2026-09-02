@@ -1,8 +1,10 @@
-import { MOVE_OPTS, travelToRoom } from "./shared";
+import { MOVE_OPTS, retreatFromHostileRemote, travelToRoom } from "./shared";
 
 export function run(creep: Creep): void {
   const remoteRoom = creep.memory.remoteRoom;
   if (!remoteRoom) return;
+
+  if (retreatFromHostileRemote(creep, remoteRoom, creep.memory.homeRoom)) return;
 
   if (!travelToRoom(creep, remoteRoom)) return;
 

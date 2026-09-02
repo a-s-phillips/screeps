@@ -19,6 +19,12 @@ class RoomPositionStub {
 // values polyfilled to reference them the same way production code does.
 Object.assign(globalThis, {
   RoomPosition: RoomPositionStub,
+  // Minimal defaults so code paths that read these unconditionally (e.g.
+  // retreatFromHostileRemote's Memory.rooms / Game.time lookups) don't throw in tests
+  // that aren't exercising that behavior - tests needing specific values still override
+  // via vi.stubGlobal, which restores to these defaults afterward.
+  Memory: { rooms: {} },
+  Game: { time: 0 },
   OK: 0,
   ERR_NOT_IN_RANGE: -9,
   ERR_NOT_ENOUGH_RESOURCES: -6,

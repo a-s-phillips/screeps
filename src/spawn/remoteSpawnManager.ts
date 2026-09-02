@@ -1,11 +1,6 @@
-import { getRemoteCandidates, resolveRemoteRoom } from "../planning/remoteTargeting";
+import { getRemoteCandidates, isRoomHostile, resolveRemoteRoom } from "../planning/remoteTargeting";
 import { bodyCost, planBody, planReserverBody, planScoutBody } from "./bodyPlanner";
 import { SpawnDecision } from "./spawnDecision";
-
-// Remote workers have zero defense (no towers/ramparts out there), unlike planRoom's
-// HOSTILE_MEMORY_WINDOW (1000) which gates tower-priority in an owned room that already
-// has defenses to fall back on - a much shorter pause is the right tradeoff here.
-const REMOTE_HOSTILE_MEMORY_WINDOW = 200;
 
 // Flat target, not scaled per source count in v1 - reasonable for the 1-2 source remote
 // rooms this feature targets; revisit once the container/miner/hauler split (v2) lands.
@@ -57,9 +52,7 @@ export function buildRemoteRoomState(homeRoom: Room, remoteRoomName: string): Re
   return {
     homeRoomName: homeRoom.name,
     remoteRoomName,
-    hostileRecentlySeen:
-      lastHostileSeenTick !== undefined &&
-      Game.time - lastHostileSeenTick <= REMOTE_HOSTILE_MEMORY_WINDOW,
+    hostileRecentlySeen: isRoomHostile(lastHostileSeenTick, Game.time),
     reserverCount,
     remoteHarvesterCount,
     energyAvailable: homeRoom.energyAvailable,

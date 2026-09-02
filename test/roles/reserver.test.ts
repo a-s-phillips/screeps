@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { run } from "../../src/roles/reserver";
 import { MOVE_OPTS, REMOTE_MOVE_OPTS } from "../../src/roles/shared";
 
@@ -7,13 +7,19 @@ const controller = { id: "controller1" };
 function mockCreep(opts: {
   roomName: string;
   remoteRoom?: string;
+  homeRoom?: string;
   hasController?: boolean;
   reserveResult?: ScreepsReturnCode;
 }) {
   const hasController = opts.hasController ?? true;
 
   return {
-    memory: { role: "reserver", working: false, remoteRoom: opts.remoteRoom },
+    memory: {
+      role: "reserver",
+      working: false,
+      remoteRoom: opts.remoteRoom,
+      homeRoom: opts.homeRoom
+    },
     room: { name: opts.roomName, controller: hasController ? controller : undefined },
     moveTo: vi.fn(),
     reserveController: vi.fn().mockReturnValue(opts.reserveResult ?? OK)
@@ -21,6 +27,24 @@ function mockCreep(opts: {
 }
 
 describe("reserver role", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("retreats home instead of reserving when the remote room has a recent hostile sighting", () => {
+    vi.stubGlobal("Game", { time: 1000 });
+    vi.stubGlobal("Memory", { rooms: { W2N1: { lastHostileSeenTick: 950 } } });
+    const creep = mockCreep({ roomName: "W2N1", remoteRoom: "W2N1", homeRoom: "W1N1" });
+
+    run(creep);
+
+    expect(creep.moveTo).toHaveBeenCalledWith(
+      expect.objectContaining({ roomName: "W1N1" }),
+      REMOTE_MOVE_OPTS
+    );
+    expect(creep.reserveController).not.toHaveBeenCalled();
+  });
+
   it("does nothing when no remote room is assigned", () => {
     const creep = mockCreep({ roomName: "W1N1" });
 
