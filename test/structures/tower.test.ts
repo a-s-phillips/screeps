@@ -132,7 +132,7 @@ describe("tower run", () => {
     expect(tower.repair).not.toHaveBeenCalled();
   });
 
-  it("does not repair a rampart once it reaches the repair cap", () => {
+  it("repairs a rampart below the repair cap even though it is far from full hits", () => {
     const rampart = {
       id: "rampart1",
       structureType: STRUCTURE_RAMPART,
@@ -143,7 +143,36 @@ describe("tower run", () => {
 
     run(tower);
 
+    expect(tower.repair).toHaveBeenCalledWith(rampart);
+  });
+
+  it("does not repair a rampart once it reaches the repair cap", () => {
+    const rampart = {
+      id: "rampart1",
+      structureType: STRUCTURE_RAMPART,
+      hits: 150000,
+      hitsMax: 300000000
+    };
+    const tower = mockTower({ structures: [rampart] });
+
+    run(tower);
+
     expect(tower.repair).not.toHaveBeenCalled();
+  });
+
+  it("prefers repairing a rampart under its higher cap over a wall already at the wall cap", () => {
+    const wall = { id: "wall1", structureType: STRUCTURE_WALL, hits: 50000, hitsMax: 300000000 };
+    const rampart = {
+      id: "rampart1",
+      structureType: STRUCTURE_RAMPART,
+      hits: 50000,
+      hitsMax: 300000000
+    };
+    const tower = mockTower({ structures: [wall, rampart] });
+
+    run(tower);
+
+    expect(tower.repair).toHaveBeenCalledWith(rampart);
   });
 
   it("withholds energy below the repair reserve threshold", () => {
