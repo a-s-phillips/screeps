@@ -7,6 +7,7 @@ import { cleanUpDeadCreepMemory } from "./memory/cleanup";
 import { recordRemoteIntel } from "./planning/remoteTargeting";
 import { planRoom } from "./planning/roomPlanner";
 import { run as runBuilder } from "./roles/builder";
+import { run as runDefender } from "./roles/defender";
 import { run as runHarvester } from "./roles/harvester";
 import { run as runHauler } from "./roles/hauler";
 import { run as runMiner } from "./roles/miner";
@@ -28,7 +29,8 @@ const roleRunners: Record<CreepRole, (creep: Creep) => void> = {
   scout: runScout,
   reserver: runReserver,
   remoteHarvester: runRemoteHarvester,
-  remoteHauler: runRemoteHauler
+  remoteHauler: runRemoteHauler,
+  defender: runDefender
 };
 
 let seenHostileIds = new Set<string>();

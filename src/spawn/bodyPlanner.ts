@@ -15,7 +15,10 @@ const BASE_BLOCKS: Record<BlockRole, BodyPartConstant[]> = {
   remoteHarvester: [WORK, CARRY, MOVE, MOVE],
   // Same 1:1 ratio as the local hauler, for the same reason remoteHarvester uses 1:1
   // instead of harvester's lighter 2:1 - no remote roads, full speed matters loaded or not.
-  remoteHauler: [CARRY, MOVE]
+  remoteHauler: [CARRY, MOVE],
+  // 1:1 ATTACK/MOVE - a defender has no cargo to slow down for, so full speed always
+  // matters, same reasoning as hauler/remoteHauler/remoteHarvester's own 1:1 ratios.
+  defender: [ATTACK, MOVE]
 };
 
 // A source regenerates SOURCE_ENERGY_CAPACITY every ENERGY_REGEN_TIME ticks; each WORK
