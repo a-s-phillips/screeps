@@ -18,7 +18,11 @@ const BASE_BLOCKS: Record<BlockRole, BodyPartConstant[]> = {
   remoteHauler: [CARRY, MOVE],
   // 1:1 ATTACK/MOVE - a defender has no cargo to slow down for, so full speed always
   // matters, same reasoning as hauler/remoteHauler/remoteHarvester's own 1:1 ratios.
-  defender: [ATTACK, MOVE]
+  defender: [ATTACK, MOVE],
+  // More CARRY-heavy than remoteHarvester's 1:1 - each safe-window trip into a Source
+  // Keeper room should carry as much as possible rather than optimizing pure harvest
+  // rate, and SK sources have a higher capacity (4000 vs. 3000) to support it.
+  keeperHarvester: [WORK, CARRY, CARRY, MOVE, MOVE]
 };
 
 // A source regenerates SOURCE_ENERGY_CAPACITY every ENERGY_REGEN_TIME ticks; each WORK

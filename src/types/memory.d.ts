@@ -9,7 +9,8 @@ declare global {
     | "reserver"
     | "remoteHarvester"
     | "remoteHauler"
-    | "defender";
+    | "defender"
+    | "keeperHarvester";
 
   interface CreepMemory {
     role: CreepRole;
@@ -32,6 +33,12 @@ declare global {
     lastHostileSeenTick?: number;
     remoteIntel?: RemoteIntel;
     remoteRooms?: string[];
+    // Manually set, not auto-resolved like remoteRooms - a Source Keeper avoidance-mining
+    // target is a deliberate one-off strategic choice, not something worth a whole
+    // candidate-picking pipeline for. Deliberately excluded from buildRemoteTargets in
+    // main.ts, since v1 keeperHarvester is self-hauling only and should never get a
+    // container planned for it.
+    keeperRoom?: string;
   }
 }
 

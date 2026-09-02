@@ -601,6 +601,27 @@ describe("runSpawning", () => {
     expect(spawn.spawnCreep).not.toHaveBeenCalled();
   });
 
+  it("spawns a keeperHarvester only once local needs are met and there's no remote-mining candidate to resolve", () => {
+    vi.stubGlobal("Game", {
+      time: 12345,
+      map: { describeExits: vi.fn().mockReturnValue({}) },
+      creeps: {
+        h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        u1: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } },
+        u2: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } }
+      }
+    });
+    vi.stubGlobal("Memory", { rooms: { W1N1: { keeperRoom: "W2N2" } } });
+    const spawn = mockSpawn(false);
+
+    runSpawning(spawn, mockRoom());
+
+    expect(spawn.spawnCreep).toHaveBeenCalledWith(expect.any(Array), "keeperHarvester_12345", {
+      memory: { role: "keeperHarvester", working: false, homeRoom: "W1N1", remoteRoom: "W2N2" }
+    });
+  });
+
   it("spawns a hauler once the harvester target is met and a container exists", () => {
     vi.stubGlobal("Game", {
       time: 12345,

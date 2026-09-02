@@ -38,4 +38,12 @@ describe("buildRemoteTargets", () => {
   it("returns an empty set when there are no owned rooms", () => {
     expect(buildRemoteTargets([], {})).toEqual(new Set());
   });
+
+  it("does not include keeperRoom in the result, even when remoteRooms is also set", () => {
+    const result = buildRemoteTargets([mockRoom("W57N25")], {
+      W57N25: { remoteRooms: ["W57N24"], keeperRoom: "W56N25" }
+    });
+
+    expect(result).toEqual(new Set(["W57N24"]));
+  });
 });

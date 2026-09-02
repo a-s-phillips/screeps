@@ -4,6 +4,7 @@ import { chebyshevDistance } from "../utils/grid";
 import { getCachedFind } from "../utils/roomCache";
 import { bodyCost, planBody, planMinerBody } from "./bodyPlanner";
 import { isNearingDeath, replacementLeadTime } from "./preSpawn";
+import { decideKeeperSpawn } from "./keeperSpawnManager";
 import { decideRemoteSpawn } from "./remoteSpawnManager";
 import { SpawnDecision } from "./spawnDecision";
 
@@ -194,9 +195,9 @@ function recycleSurplusHarvesters(
 export function runSpawning(spawn: StructureSpawn, room: Room): void {
   if (spawn.spawning) return;
 
-  // scout/reserver/remoteHarvester/remoteHauler are remote-only roles, tracked
-  // separately by the remote spawn pass (their memory.remoteRoom, not creep.room, is
-  // what matters for counting them) - present here at 0 only to satisfy
+  // scout/reserver/remoteHarvester/remoteHauler/keeperHarvester are remote-only roles,
+  // tracked separately by the remote/keeper spawn passes (their memory.remoteRoom, not
+  // creep.room, is what matters for counting them) - present here at 0 only to satisfy
   // Record<CreepRole, number>. A remote miner is also excluded from this room's own
   // count naturally, since it physically sits in the remote room (creep.room.name !==
   // room.name below). defender is a genuine home-room role (unlike the above) - its 0
@@ -212,6 +213,7 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     reserver: 0,
     remoteHarvester: 0,
     remoteHauler: 0,
+    keeperHarvester: 0,
     defender: 0
   };
   const harvesterCreeps: Creep[] = [];
@@ -329,7 +331,8 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
   }
 
   const decision =
-    decideNextSpawn(state) ?? (hasUnmetLocalNeed(state) ? null : decideRemoteSpawn(room));
+    decideNextSpawn(state) ??
+    (hasUnmetLocalNeed(state) ? null : (decideRemoteSpawn(room) ?? decideKeeperSpawn(room)));
   if (!decision) return;
 
   const name = `${decision.role}_${Game.time}`;

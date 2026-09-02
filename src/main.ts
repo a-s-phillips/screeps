@@ -10,6 +10,7 @@ import { run as runBuilder } from "./roles/builder";
 import { run as runDefender } from "./roles/defender";
 import { run as runHarvester } from "./roles/harvester";
 import { run as runHauler } from "./roles/hauler";
+import { run as runKeeperHarvester } from "./roles/keeperHarvester";
 import { run as runMiner } from "./roles/miner";
 import { run as runRemoteHarvester } from "./roles/remoteHarvester";
 import { run as runRemoteHauler } from "./roles/remoteHauler";
@@ -30,7 +31,8 @@ const roleRunners: Record<CreepRole, (creep: Creep) => void> = {
   reserver: runReserver,
   remoteHarvester: runRemoteHarvester,
   remoteHauler: runRemoteHauler,
-  defender: runDefender
+  defender: runDefender,
+  keeperHarvester: runKeeperHarvester
 };
 
 let seenHostileIds = new Set<string>();
