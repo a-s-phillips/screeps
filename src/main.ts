@@ -47,6 +47,13 @@ export function loop(): void {
       roleRunners[creep.memory.role](creep);
     }
 
+    const remoteTargets = new Set(
+      Object.values(Game.rooms)
+        .filter((room) => room.controller?.my)
+        .map((room) => Memory.rooms[room.name]?.remoteRoom)
+        .filter((remoteRoom): remoteRoom is string => remoteRoom !== undefined)
+    );
+
     for (const roomName in Game.rooms) {
       const room = Game.rooms[roomName];
 
@@ -71,7 +78,11 @@ export function loop(): void {
       );
       for (const tower of towers) runTower(tower);
 
-      planRoom(room, Memory.rooms[roomName]);
+      planRoom(
+        room,
+        Memory.rooms[roomName],
+        (room.controller?.my ?? false) || remoteTargets.has(roomName)
+      );
     }
 
     log("tick_summary", {

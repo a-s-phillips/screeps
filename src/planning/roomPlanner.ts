@@ -95,9 +95,12 @@ function planContainers(room: Room): void {
     (c) => c.pos
   );
 
+  // Only anchor on the controller when we own it - a remote-mining target's controller
+  // isn't something we'll ever benefit from upgrading, so it shouldn't burn one of the
+  // (flat, RCL-0-allowed) 5 container slots.
   const anchors: Point[] = [
     ...getCachedFind(room, FIND_SOURCES).map((source) => ({ x: source.pos.x, y: source.pos.y })),
-    { x: room.controller.pos.x, y: room.controller.pos.y }
+    ...(room.controller.my ? [{ x: room.controller.pos.x, y: room.controller.pos.y }] : [])
   ];
 
   for (const anchor of anchors) {
@@ -170,7 +173,22 @@ export function planTowers(
   }
 }
 
-export function planRoom(room: Room, memory: RoomMemory): void {
+// Extensions/towers require ownership to build at all (and are already self-gated by
+// the RCL-0 CONTROLLER_STRUCTURES table for an unowned controller); roads aren't useful
+// without a colony to connect. Containers are the exception - allowed at RCL 0, and
+// exactly what a remote-mining target needs - so they're planned for an owned room OR
+// a room explicitly passed in as some home room's chosen remote target, never for a
+// room that's merely visible (e.g. one a scout is passing through).
+export function planRoom(
+  room: Room,
+  memory: RoomMemory,
+  isOwnedOrRemoteTarget: boolean = room.controller?.my ?? false
+): void {
+  if (!room.controller?.my) {
+    if (isOwnedOrRemoteTarget) planContainers(room);
+    return;
+  }
+
   const extensionsDone = planExtensions(room);
   planContainers(room);
   const roadsDone = planRoads(room, memory);

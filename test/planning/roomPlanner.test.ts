@@ -18,6 +18,7 @@ function mockRoom(opts: {
   pendingTowerSites?: { x: number; y: number }[];
   createResult?: ScreepsReturnCode;
   findPathResult?: { x: number; y: number }[];
+  isMine?: boolean;
 }) {
   const existingExtensions = opts.existingExtensions ?? [];
   const pendingExtensionSites = opts.pendingExtensionSites ?? [];
@@ -32,7 +33,7 @@ function mockRoom(opts: {
 
   const room = {
     name: "W1N1",
-    controller: { level: opts.level, pos: { x: 40, y: 40 } },
+    controller: { level: opts.level, pos: { x: 40, y: 40 }, my: opts.isMine ?? true },
     find: vi.fn((type: FindConstant) => {
       if (type === FIND_MY_STRUCTURES) {
         return [
@@ -308,6 +309,66 @@ describe("planRoom", () => {
         expect.any(Number),
         STRUCTURE_CONTAINER
       );
+    });
+
+    it("does not anchor a container on the controller when the room isn't owned", () => {
+      // A container is allowed at RCL 0 (the flat CONTROLLER_STRUCTURES.container table),
+      // so an unowned room's controller would otherwise burn one of the 5 slots on a
+      // spot we'll never benefit from upgrading - found live: this ran, unmodified,
+      // for any room a scout merely passed through.
+      const room = mockRoom({
+        level: 0,
+        isMine: false,
+        sources: [{ x: 10, y: 10 }],
+        existingContainers: [{ x: 11, y: 10 }]
+      });
+
+      planRoom(room, { roadPlan: [] }, true);
+
+      expect(room.createConstructionSite).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("ownership guard", () => {
+    it("skips extensions, roads, and towers entirely for a room that isn't owned", () => {
+      const room = mockRoom({ level: 2, isMine: false, existingExtensions: [] });
+
+      planRoom(room, { roadPlan: [] }, true);
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_EXTENSION
+      );
+      expect(room.findPath).not.toHaveBeenCalled();
+    });
+
+    it("still plans containers for an unowned room passed in as a remote-mining target", () => {
+      const room = mockRoom({ level: 0, isMine: false, sources: [{ x: 10, y: 10 }] });
+
+      planRoom(room, { roadPlan: [] }, true);
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_CONTAINER
+      );
+    });
+
+    it("does nothing at all for an unowned room that is not a remote-mining target", () => {
+      const room = mockRoom({ level: 0, isMine: false, sources: [{ x: 10, y: 10 }] });
+
+      planRoom(room, { roadPlan: [] }, false);
+
+      expect(room.createConstructionSite).not.toHaveBeenCalled();
+    });
+
+    it("defaults to the room's own ownership when no explicit flag is passed", () => {
+      const room = mockRoom({ level: 0, isMine: false, sources: [{ x: 10, y: 10 }] });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalled();
     });
   });
 
