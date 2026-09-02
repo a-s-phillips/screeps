@@ -9,15 +9,16 @@ import {
 
 describe("decideScoutSpawn", () => {
   it("spawns a scout for the first candidate with no recorded intel and no scout en route", () => {
-    const decision = decideScoutSpawn(["W9N9", "W8N8"], {}, new Set());
+    const decision = decideScoutSpawn("W9N8", ["W9N9", "W8N8"], {}, new Set());
 
     expect(decision?.role).toBe("scout");
     expect(decision?.body).toEqual([MOVE]);
-    expect(decision?.memory).toEqual({ remoteRoom: "W9N9" });
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W9N9" });
   });
 
   it("skips a candidate that already has recorded intel", () => {
     const decision = decideScoutSpawn(
+      "W9N8",
       ["W9N9", "W8N8"],
       {
         W9N9: {
@@ -32,17 +33,18 @@ describe("decideScoutSpawn", () => {
       new Set()
     );
 
-    expect(decision?.memory).toEqual({ remoteRoom: "W8N8" });
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W8N8" });
   });
 
   it("skips a candidate that already has a scout en route", () => {
-    const decision = decideScoutSpawn(["W9N9", "W8N8"], {}, new Set(["W9N9"]));
+    const decision = decideScoutSpawn("W9N8", ["W9N9", "W8N8"], {}, new Set(["W9N9"]));
 
-    expect(decision?.memory).toEqual({ remoteRoom: "W8N8" });
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W8N8" });
   });
 
   it("returns null once every candidate is either scouted or has a scout en route", () => {
     const decision = decideScoutSpawn(
+      "W9N8",
       ["W9N9", "W8N8"],
       {
         W9N9: {
@@ -61,7 +63,7 @@ describe("decideScoutSpawn", () => {
   });
 
   it("returns null for an empty candidate list", () => {
-    expect(decideScoutSpawn([], {}, new Set())).toBeNull();
+    expect(decideScoutSpawn("W9N8", [], {}, new Set())).toBeNull();
   });
 });
 
@@ -84,7 +86,7 @@ describe("decideRemoteSpawn", () => {
     const decision = decideRemoteSpawn(mockRoom("W9N8"));
 
     expect(decision?.role).toBe("scout");
-    expect(decision?.memory).toEqual({ remoteRoom: "W9N9" });
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W9N9" });
   });
 
   it("spawns a reserver once a remote room is resolved but has none yet", () => {
@@ -94,7 +96,7 @@ describe("decideRemoteSpawn", () => {
     const decision = decideRemoteSpawn(mockRoom("W9N8"));
 
     expect(decision?.role).toBe("reserver");
-    expect(decision?.memory).toEqual({ remoteRoom: "W8N8" });
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W8N8" });
     expect(Game.map.describeExits).not.toHaveBeenCalled();
   });
 
@@ -155,7 +157,7 @@ describe("decideNextRemoteSpawn", () => {
 
     expect(decision?.role).toBe("reserver");
     expect(decision?.body).toEqual([CLAIM, MOVE]);
-    expect(decision?.memory).toEqual({ remoteRoom: "W8N8" });
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W8N8" });
   });
 
   it("spawns a remoteHarvester once a reserver exists and the target isn't met", () => {

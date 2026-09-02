@@ -14,6 +14,7 @@ const REMOTE_HARVESTER_TARGET = 2;
 // One scout at a time is plenty - scouts are 50E and this naturally rate-limits against
 // local spawning, converging to "every candidate scouted" over a few spawn cycles.
 export function decideScoutSpawn(
+  homeRoomName: string,
   candidates: string[],
   candidateMemories: Record<string, RoomMemory | undefined>,
   liveScoutTargets: Set<string>
@@ -24,7 +25,11 @@ export function decideScoutSpawn(
   );
   if (!target) return null;
 
-  return { role: "scout", body: planScoutBody(), memory: { remoteRoom: target } };
+  return {
+    role: "scout",
+    body: planScoutBody(),
+    memory: { homeRoom: homeRoomName, remoteRoom: target }
+  };
 }
 
 export interface RemoteRoomState {
@@ -71,7 +76,11 @@ export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | n
   if (state.reserverCount === 0) {
     const body = planReserverBody();
     if (bodyCost(body) <= state.energyAvailable) {
-      return { role: "reserver", body, memory: { remoteRoom: state.remoteRoomName } };
+      return {
+        role: "reserver",
+        body,
+        memory: { homeRoom: state.homeRoomName, remoteRoom: state.remoteRoomName }
+      };
     }
     return null;
   }
@@ -121,5 +130,5 @@ export function decideRemoteSpawn(room: Room): SpawnDecision | null {
       .filter((remoteRoom): remoteRoom is string => remoteRoom !== undefined)
   );
 
-  return decideScoutSpawn(candidates, candidateMemories, liveScoutTargets);
+  return decideScoutSpawn(room.name, candidates, candidateMemories, liveScoutTargets);
 }
