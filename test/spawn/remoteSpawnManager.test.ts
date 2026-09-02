@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { decideRemoteSpawn, decideScoutSpawn } from "../../src/spawn/remoteSpawnManager";
+import {
+  buildRemoteRoomState,
+  decideNextRemoteSpawn,
+  decideRemoteSpawn,
+  decideScoutSpawn,
+  RemoteRoomState
+} from "../../src/spawn/remoteSpawnManager";
 
 describe("decideScoutSpawn", () => {
   it("spawns a scout for the first candidate with no recorded intel and no scout en route", () => {
@@ -59,8 +65,8 @@ describe("decideScoutSpawn", () => {
   });
 });
 
-function mockRoom(name: string) {
-  return { name } as unknown as Room;
+function mockRoom(name: string, energy = 1000) {
+  return { name, energyAvailable: energy, energyCapacityAvailable: energy } as unknown as Room;
 }
 
 describe("decideRemoteSpawn", () => {
@@ -81,13 +87,14 @@ describe("decideRemoteSpawn", () => {
     expect(decision?.memory).toEqual({ remoteRoom: "W9N9" });
   });
 
-  it("returns null once a remote room has already been resolved", () => {
+  it("spawns a reserver once a remote room is resolved but has none yet", () => {
     vi.stubGlobal("Game", { map: { describeExits: vi.fn() }, creeps: {} });
     vi.stubGlobal("Memory", { rooms: { W9N8: { remoteRoom: "W8N8" } } });
 
     const decision = decideRemoteSpawn(mockRoom("W9N8"));
 
-    expect(decision).toBeNull();
+    expect(decision?.role).toBe("reserver");
+    expect(decision?.memory).toEqual({ remoteRoom: "W8N8" });
     expect(Game.map.describeExits).not.toHaveBeenCalled();
   });
 
@@ -124,7 +131,99 @@ describe("decideRemoteSpawn", () => {
 
     const decision = decideRemoteSpawn(mockRoom("W9N8"));
 
-    expect(decision).toBeNull();
+    expect(decision?.role).toBe("reserver");
     expect(rooms.W9N8.remoteRoom).toBe("W9N9");
+  });
+});
+
+function baseRemoteState(overrides: Partial<RemoteRoomState> = {}): RemoteRoomState {
+  return {
+    homeRoomName: "W9N8",
+    remoteRoomName: "W8N8",
+    hostileRecentlySeen: false,
+    reserverCount: 0,
+    remoteHarvesterCount: 0,
+    energyAvailable: 1000,
+    energyCapacityAvailable: 1000,
+    ...overrides
+  };
+}
+
+describe("decideNextRemoteSpawn", () => {
+  it("spawns a reserver when there is none yet", () => {
+    const decision = decideNextRemoteSpawn(baseRemoteState());
+
+    expect(decision?.role).toBe("reserver");
+    expect(decision?.body).toEqual([CLAIM, MOVE]);
+    expect(decision?.memory).toEqual({ remoteRoom: "W8N8" });
+  });
+
+  it("spawns a remoteHarvester once a reserver exists and the target isn't met", () => {
+    const decision = decideNextRemoteSpawn(baseRemoteState({ reserverCount: 1 }));
+
+    expect(decision?.role).toBe("remoteHarvester");
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W8N8" });
+  });
+
+  it("returns null once the reserver and remoteHarvester targets are both met", () => {
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, remoteHarvesterCount: 2 })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  it("returns null when a hostile has been seen recently in the remote room, even with no reserver", () => {
+    const decision = decideNextRemoteSpawn(baseRemoteState({ hostileRecentlySeen: true }));
+
+    expect(decision).toBeNull();
+  });
+
+  it("returns null when the reserver body is unaffordable", () => {
+    const decision = decideNextRemoteSpawn(baseRemoteState({ energyAvailable: 100 }));
+
+    expect(decision).toBeNull();
+  });
+});
+
+describe("buildRemoteRoomState", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("counts reservers and remoteHarvesters assigned to this specific remote room", () => {
+    vi.stubGlobal("Game", {
+      time: 1000,
+      creeps: {
+        r1: { memory: { role: "reserver", remoteRoom: "W8N8" } },
+        rh1: { memory: { role: "remoteHarvester", remoteRoom: "W8N8" } },
+        rh2: { memory: { role: "remoteHarvester", remoteRoom: "W9N7" } },
+        s1: { memory: { role: "scout", remoteRoom: "W8N8" } }
+      }
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.reserverCount).toBe(1);
+    expect(state.remoteHarvesterCount).toBe(1);
+  });
+
+  it("reports a recently-seen hostile within the remote-room recency window", () => {
+    vi.stubGlobal("Game", { time: 1000, creeps: {} });
+    vi.stubGlobal("Memory", { rooms: { W8N8: { lastHostileSeenTick: 950 } } });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.hostileRecentlySeen).toBe(true);
+  });
+
+  it("does not report a hostile seen long ago as recent", () => {
+    vi.stubGlobal("Game", { time: 5000, creeps: {} });
+    vi.stubGlobal("Memory", { rooms: { W8N8: { lastHostileSeenTick: 100 } } });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.hostileRecentlySeen).toBe(false);
   });
 });
