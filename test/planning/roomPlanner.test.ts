@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { planRoom, planTowers } from "../../src/planning/roomPlanner";
+import {
+  isLocalHostileRecentlySeen,
+  planRamparts,
+  planRoom,
+  planTowers
+} from "../../src/planning/roomPlanner";
 import { resetRoomCache } from "../../src/utils/roomCache";
 import * as logger from "../../src/logging/logger";
 
@@ -16,6 +21,8 @@ function mockRoom(opts: {
   pendingRoadSites?: { x: number; y: number }[];
   existingTowers?: { x: number; y: number }[];
   pendingTowerSites?: { x: number; y: number }[];
+  existingRamparts?: { x: number; y: number }[];
+  pendingRampartSites?: { x: number; y: number }[];
   createResult?: ScreepsReturnCode;
   findPathResult?: { x: number; y: number }[];
   isMine?: boolean;
@@ -29,6 +36,8 @@ function mockRoom(opts: {
   const pendingRoadSites = opts.pendingRoadSites ?? [];
   const existingTowers = opts.existingTowers ?? [];
   const pendingTowerSites = opts.pendingTowerSites ?? [];
+  const existingRamparts = opts.existingRamparts ?? [];
+  const pendingRampartSites = opts.pendingRampartSites ?? [];
   const spawn = { pos: { x: 25, y: 25 } };
 
   const room = {
@@ -38,7 +47,8 @@ function mockRoom(opts: {
       if (type === FIND_MY_STRUCTURES) {
         return [
           ...existingExtensions.map((p) => ({ structureType: STRUCTURE_EXTENSION, pos: p })),
-          ...existingTowers.map((p) => ({ structureType: STRUCTURE_TOWER, pos: p }))
+          ...existingTowers.map((p) => ({ structureType: STRUCTURE_TOWER, pos: p })),
+          ...existingRamparts.map((p) => ({ structureType: STRUCTURE_RAMPART, pos: p }))
         ];
       }
       if (type === FIND_STRUCTURES) {
@@ -52,7 +62,8 @@ function mockRoom(opts: {
           ...pendingExtensionSites.map((p) => ({ structureType: STRUCTURE_EXTENSION, pos: p })),
           ...pendingContainerSites.map((p) => ({ structureType: STRUCTURE_CONTAINER, pos: p })),
           ...pendingRoadSites.map((p) => ({ structureType: STRUCTURE_ROAD, pos: p })),
-          ...pendingTowerSites.map((p) => ({ structureType: STRUCTURE_TOWER, pos: p }))
+          ...pendingTowerSites.map((p) => ({ structureType: STRUCTURE_TOWER, pos: p })),
+          ...pendingRampartSites.map((p) => ({ structureType: STRUCTURE_RAMPART, pos: p }))
         ];
       }
       if (type === FIND_CONSTRUCTION_SITES) return [];
@@ -483,13 +494,190 @@ describe("planRoom", () => {
     it("places a tower when overridePriority is explicitly true, regardless of the other gates", () => {
       const room = mockRoom({ level: 3 });
 
-      planTowers(room, { roadPlan: [{ x: 1, y: 1 }] }, false, true);
+      planTowers(room, false, false, true);
 
       expect(room.createConstructionSite).toHaveBeenCalledWith(
         expect.any(Number),
         expect.any(Number),
         STRUCTURE_TOWER
       );
+    });
+  });
+
+  describe("ramparts", () => {
+    // Extension cap at RCL3 is 10 (test/setup.ts) - fill it so planExtensions reports done.
+    const extensionsAtCap = Array.from({ length: 10 }, (_, i) => ({ x: i, y: i }));
+
+    it("places a rampart on the spawn's tile when none exists there yet", () => {
+      const room = mockRoom({ level: 3, existingExtensions: extensionsAtCap });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(25, 25, STRUCTURE_RAMPART);
+      expect(logger.log).toHaveBeenCalledWith(
+        "construction_site_planned",
+        expect.objectContaining({ room: "W1N1", structureType: STRUCTURE_RAMPART })
+      );
+    });
+
+    it("places a rampart on an existing tower's tile once the spawn is already ramparted", () => {
+      const room = mockRoom({
+        level: 3,
+        existingExtensions: extensionsAtCap,
+        existingRamparts: [{ x: 25, y: 25 }],
+        existingTowers: [{ x: 30, y: 30 }]
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(30, 30, STRUCTURE_RAMPART);
+    });
+
+    it("does not place a rampart on a spawn tile that already has one", () => {
+      const room = mockRoom({
+        level: 3,
+        existingExtensions: extensionsAtCap,
+        existingRamparts: [{ x: 25, y: 25 }]
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_RAMPART
+      );
+    });
+
+    it("does not place a rampart on a spawn tile that already has a pending rampart site", () => {
+      const room = mockRoom({
+        level: 3,
+        existingExtensions: extensionsAtCap,
+        pendingRampartSites: [{ x: 25, y: 25 }]
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_RAMPART
+      );
+    });
+
+    it("places at most one rampart site per call, moving on to the next uncovered anchor next time", () => {
+      const room = mockRoom({
+        level: 3,
+        existingExtensions: extensionsAtCap,
+        existingTowers: [{ x: 30, y: 30 }]
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      const rampartCalls = (
+        room.createConstructionSite as ReturnType<typeof vi.fn>
+      ).mock.calls.filter(([, , structureType]) => structureType === STRUCTURE_RAMPART);
+      expect(rampartCalls).toHaveLength(1);
+    });
+
+    it("does nothing when there is no spawn or tower to anchor on", () => {
+      const room = mockRoom({ level: 3, existingExtensions: extensionsAtCap });
+      (room.find as ReturnType<typeof vi.fn>).mockImplementation((type: FindConstant) => {
+        if (type === FIND_MY_SPAWNS) return [];
+        return [];
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_RAMPART
+      );
+    });
+
+    it("does not place a rampart while extensions still need building", () => {
+      const room = mockRoom({ level: 3 });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_RAMPART
+      );
+    });
+
+    it("does not place a rampart while roads still need building", () => {
+      const room = mockRoom({ level: 3, existingExtensions: extensionsAtCap });
+
+      planRoom(room, { roadPlan: [{ x: 1, y: 1 }] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_RAMPART
+      );
+    });
+
+    it("places a rampart when a hostile was seen recently, even with extensions/roads pending", () => {
+      vi.stubGlobal("Game", { time: 500 });
+      const room = mockRoom({ level: 3 });
+
+      planRoom(room, { roadPlan: [{ x: 1, y: 1 }], lastHostileSeenTick: 200 });
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_RAMPART
+      );
+    });
+
+    it("does not place a rampart when the last hostile sighting is outside the memory window", () => {
+      vi.stubGlobal("Game", { time: 5000 });
+      const room = mockRoom({ level: 3 });
+
+      planRoom(room, { roadPlan: [{ x: 1, y: 1 }], lastHostileSeenTick: 200 });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_RAMPART
+      );
+    });
+
+    it("places a rampart when overridePriority is explicitly true, regardless of the other gates", () => {
+      const room = mockRoom({ level: 3 });
+
+      planRamparts(room, false, false, true);
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_RAMPART
+      );
+    });
+
+    it("does nothing below RCL2, where CONTROLLER_STRUCTURES.rampart is 0", () => {
+      const room = mockRoom({ level: 1 });
+
+      planRamparts(room, false, false, true);
+
+      expect(room.createConstructionSite).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("isLocalHostileRecentlySeen", () => {
+    it("is true when the sighting is within the memory window", () => {
+      expect(isLocalHostileRecentlySeen(200, 500)).toBe(true);
+    });
+
+    it("is false when the sighting is outside the memory window", () => {
+      expect(isLocalHostileRecentlySeen(200, 5000)).toBe(false);
+    });
+
+    it("is false when there is no recorded sighting", () => {
+      expect(isLocalHostileRecentlySeen(undefined, 500)).toBe(false);
     });
   });
 });

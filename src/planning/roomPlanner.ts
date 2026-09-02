@@ -6,10 +6,20 @@ import { findExtensionSite } from "./extensionPlanner";
 import { planRoads } from "./roadPlanner";
 import { findTowerSite } from "./towerPlanner";
 
-// Ticks a hostile sighting keeps the tower-priority gate open after last seen - tune freely.
-const HOSTILE_MEMORY_WINDOW = 1000;
-// Flip to true (and redeploy) to force tower construction now, bypassing the a/b gates below.
+// Ticks a hostile sighting keeps the tower/rampart-priority gate open after last seen - tune freely.
+export const HOSTILE_MEMORY_WINDOW = 1000;
+// Flip to true (and redeploy) to force tower/rampart construction now, bypassing the gates below.
 export const TOWER_PRIORITY_OVERRIDE = false;
+
+// Shared by tower priority, rampart priority, and (in spawnManager.ts) the defender
+// spawn trigger - one source of truth for "is this room's hostile sighting still
+// fresh" so the three can't drift out of sync on what counts as under threat.
+export function isLocalHostileRecentlySeen(
+  lastHostileSeenTick: number | undefined,
+  now: number
+): boolean {
+  return lastHostileSeenTick !== undefined && now - lastHostileSeenTick <= HOSTILE_MEMORY_WINDOW;
+}
 
 function buildOccupancy(room: Room): {
   isWalkable: (x: number, y: number) => boolean;
@@ -132,7 +142,7 @@ function planContainers(room: Room): void {
 // unit-testable without mutating shared module state.
 export function planTowers(
   room: Room,
-  memory: RoomMemory,
+  hostileRecentlySeen: boolean,
   essentialQueueEmpty: boolean,
   overridePriority = TOWER_PRIORITY_OVERRIDE
 ): void {
@@ -148,10 +158,6 @@ export function planTowers(
   ).length;
 
   if (existingTowers + pendingTowerSites >= allowed) return;
-
-  const hostileRecentlySeen =
-    memory.lastHostileSeenTick !== undefined &&
-    Game.time - memory.lastHostileSeenTick <= HOSTILE_MEMORY_WINDOW;
 
   if (!overridePriority && !hostileRecentlySeen && !essentialQueueEmpty) return;
 
@@ -170,6 +176,65 @@ export function planTowers(
       y: site.y,
       structureType: STRUCTURE_TOWER
     });
+  }
+}
+
+// Ramparts stack directly on the tile of the structure they protect - unlike every
+// other structure type, Screeps allows a rampart construction site on an already-
+// occupied tile (that's the entire point: it shields whatever's underneath). No ring
+// search needed - the anchor tile is already valid by definition of having a spawn or
+// tower on it. Same priority gate as planTowers (essential queue empty, hostile
+// recently seen, or override), sharing TOWER_PRIORITY_OVERRIDE rather than a second
+// constant, since both are "defensive investment" construction.
+export function planRamparts(
+  room: Room,
+  hostileRecentlySeen: boolean,
+  essentialQueueEmpty: boolean,
+  overridePriority = TOWER_PRIORITY_OVERRIDE
+): void {
+  if (!room.controller) return;
+
+  const allowed = CONTROLLER_STRUCTURES[STRUCTURE_RAMPART][room.controller.level] ?? 0;
+
+  const myStructures = getCachedFind(room, FIND_MY_STRUCTURES);
+  const existingRamparts = myStructures.filter(
+    (structure) => structure.structureType === STRUCTURE_RAMPART
+  );
+  const pendingRampartSites = getCachedFind(room, FIND_MY_CONSTRUCTION_SITES).filter(
+    (site) => site.structureType === STRUCTURE_RAMPART
+  );
+
+  if (existingRamparts.length + pendingRampartSites.length >= allowed) return;
+
+  if (!overridePriority && !hostileRecentlySeen && !essentialQueueEmpty) return;
+
+  const rampartedPositions: Point[] = [...existingRamparts, ...pendingRampartSites].map(
+    (structure) => structure.pos
+  );
+
+  const spawn = getCachedFind(room, FIND_MY_SPAWNS)[0];
+  const towers = myStructures.filter((structure) => structure.structureType === STRUCTURE_TOWER);
+  const anchors: Point[] = [
+    ...(spawn ? [{ x: spawn.pos.x, y: spawn.pos.y }] : []),
+    ...towers.map((tower) => ({ x: tower.pos.x, y: tower.pos.y }))
+  ];
+
+  for (const anchor of anchors) {
+    const hasRampart = rampartedPositions.some(
+      (pos) => pos.x === anchor.x && pos.y === anchor.y
+    );
+    if (hasRampart) continue;
+
+    const result = room.createConstructionSite(anchor.x, anchor.y, STRUCTURE_RAMPART);
+    if (result === OK) {
+      log("construction_site_planned", {
+        room: room.name,
+        x: anchor.x,
+        y: anchor.y,
+        structureType: STRUCTURE_RAMPART
+      });
+      return;
+    }
   }
 }
 
@@ -192,5 +257,8 @@ export function planRoom(
   const extensionsDone = planExtensions(room);
   planContainers(room);
   const roadsDone = planRoads(room, memory);
-  planTowers(room, memory, extensionsDone && roadsDone);
+  const hostileRecentlySeen = isLocalHostileRecentlySeen(memory.lastHostileSeenTick, Game.time);
+  const essentialQueueEmpty = extensionsDone && roadsDone;
+  planTowers(room, hostileRecentlySeen, essentialQueueEmpty);
+  planRamparts(room, hostileRecentlySeen, essentialQueueEmpty);
 }
