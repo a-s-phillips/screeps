@@ -44,23 +44,34 @@ export function pickBestCandidate(
   );
 }
 
-// A one-time, sticky decision per home room: once a remote room is chosen, it's never
+// Home rooms can staff up to this many remote rooms at once - not unbounded expansion,
+// just enough to be a real second lever once v2's economics have proven out on the first.
+export const MAX_REMOTE_ROOMS = 2;
+
+// A one-time, sticky decision per slot: once a remote room is chosen, it's never
 // re-evaluated in v1 (no story yet for "the choice turned out worse than expected").
-export function resolveRemoteRoom(
+// Resolves at most one additional room per call - the caller re-calls this once the
+// newly-resolved room's own spawn needs are satisfied, same as any other role target.
+export function resolveNextRemoteRoom(
   homeRoomName: string,
   homeMemory: RoomMemory,
   candidateMemories: Record<string, RoomMemory | undefined>
 ): string | undefined {
-  if (homeMemory.remoteRoom) return homeMemory.remoteRoom;
+  const chosen = homeMemory.remoteRooms ?? [];
+  if (chosen.length >= MAX_REMOTE_ROOMS) return undefined;
 
-  const candidates = getRemoteCandidates(homeRoomName);
+  const candidates = getRemoteCandidates(homeRoomName).filter(
+    (candidate) => !chosen.includes(candidate)
+  );
   const intelByRoom: Record<string, RemoteIntel | undefined> = {};
   for (const candidate of candidates) {
     intelByRoom[candidate] = candidateMemories[candidate]?.remoteIntel;
   }
 
   const best = pickBestCandidate(candidates, intelByRoom);
-  if (best) homeMemory.remoteRoom = best;
+  if (!best) return undefined;
+
+  homeMemory.remoteRooms = [...chosen, best];
   return best;
 }
 

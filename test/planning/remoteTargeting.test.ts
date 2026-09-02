@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getRemoteCandidates,
   isRoomHostile,
+  MAX_REMOTE_ROOMS,
   pickBestCandidate,
   recordRemoteIntel,
   REMOTE_HOSTILE_MEMORY_WINDOW,
-  resolveRemoteRoom
+  resolveNextRemoteRoom
 } from "../../src/planning/remoteTargeting";
 import { resetRoomCache } from "../../src/utils/roomCache";
 
@@ -111,48 +112,96 @@ describe("pickBestCandidate", () => {
   });
 });
 
-describe("resolveRemoteRoom", () => {
+describe("resolveNextRemoteRoom", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("returns the already-chosen remote room without re-evaluating candidates", () => {
+  it("returns undefined immediately once at the cap, without touching Game.map", () => {
     vi.stubGlobal("Game", { map: { describeExits: vi.fn() } });
-    const homeMemory: RoomMemory = { remoteRoom: "W8N8" };
+    const homeMemory: RoomMemory = {
+      remoteRooms: Array.from({ length: MAX_REMOTE_ROOMS }, (_, i) => `R${i}`)
+    };
 
-    const result = resolveRemoteRoom("W9N8", homeMemory, {});
+    const result = resolveNextRemoteRoom("W9N8", homeMemory, {});
 
-    expect(result).toBe("W8N8");
+    expect(result).toBeUndefined();
     expect(Game.map.describeExits).not.toHaveBeenCalled();
   });
 
-  it("picks and persists the best candidate once every candidate has intel", () => {
+  it("picks and appends a second candidate once every remaining candidate has intel", () => {
+    vi.stubGlobal("Game", {
+      map: { describeExits: vi.fn().mockReturnValue({ "1": "W9N9", "3": "W8N8", "5": "W9N7" }) }
+    });
+    const homeMemory: RoomMemory = { remoteRooms: ["W8N8"] };
+
+    const result = resolveNextRemoteRoom("W9N8", homeMemory, {
+      W9N9: { remoteIntel: intel({ sourceCount: 2 }) },
+      W9N7: { remoteIntel: intel({ sourceCount: 1 }) }
+    });
+
+    expect(result).toBe("W9N9");
+    expect(homeMemory.remoteRooms).toEqual(["W8N8", "W9N9"]);
+  });
+
+  it("excludes an already-chosen room from the candidate pool even if it would still win on source count", () => {
+    vi.stubGlobal("Game", {
+      map: { describeExits: vi.fn().mockReturnValue({ "1": "W9N9", "3": "W8N8" }) }
+    });
+    const homeMemory: RoomMemory = { remoteRooms: ["W8N8"] };
+
+    const result = resolveNextRemoteRoom("W9N8", homeMemory, {
+      W9N9: { remoteIntel: intel({ sourceCount: 1 }) },
+      W8N8: { remoteIntel: intel({ sourceCount: 99 }) }
+    });
+
+    expect(result).toBe("W9N9");
+    expect(homeMemory.remoteRooms).toEqual(["W8N8", "W9N9"]);
+  });
+
+  it("returns undefined and does not mutate remoteRooms while a remaining candidate is still unscouted", () => {
+    vi.stubGlobal("Game", {
+      map: { describeExits: vi.fn().mockReturnValue({ "1": "W9N9", "3": "W8N8", "5": "W9N7" }) }
+    });
+    const homeMemory: RoomMemory = { remoteRooms: ["W8N8"] };
+
+    const result = resolveNextRemoteRoom("W9N8", homeMemory, {
+      W9N9: { remoteIntel: intel() }
+    });
+
+    expect(result).toBeUndefined();
+    expect(homeMemory.remoteRooms).toEqual(["W8N8"]);
+  });
+
+  it("resolves the first-ever remote room into a fresh array, not [undefined, picked]", () => {
     vi.stubGlobal("Game", {
       map: { describeExits: vi.fn().mockReturnValue({ "1": "W9N9", "3": "W8N8" }) }
     });
     const homeMemory: RoomMemory = {};
 
-    const result = resolveRemoteRoom("W9N8", homeMemory, {
+    const result = resolveNextRemoteRoom("W9N8", homeMemory, {
       W9N9: { remoteIntel: intel({ ownedByOther: true }) },
       W8N8: { remoteIntel: intel({ sourceCount: 2 }) }
     });
 
     expect(result).toBe("W8N8");
-    expect(homeMemory.remoteRoom).toBe("W8N8");
+    expect(homeMemory.remoteRooms).toEqual(["W8N8"]);
   });
 
-  it("returns undefined and does not persist anything while candidates are still unscouted", () => {
+  it("still resolves one more when exactly one slot under MAX_REMOTE_ROOMS remains", () => {
     vi.stubGlobal("Game", {
-      map: { describeExits: vi.fn().mockReturnValue({ "1": "W9N9", "3": "W8N8" }) }
+      map: { describeExits: vi.fn().mockReturnValue({ "1": "W9N9" }) }
     });
-    const homeMemory: RoomMemory = {};
+    const homeMemory: RoomMemory = {
+      remoteRooms: Array.from({ length: MAX_REMOTE_ROOMS - 1 }, (_, i) => `R${i}`)
+    };
 
-    const result = resolveRemoteRoom("W9N8", homeMemory, {
-      W9N9: { remoteIntel: intel() }
+    const result = resolveNextRemoteRoom("W9N8", homeMemory, {
+      W9N9: { remoteIntel: intel({ sourceCount: 1 }) }
     });
 
-    expect(result).toBeUndefined();
-    expect(homeMemory.remoteRoom).toBeUndefined();
+    expect(result).toBe("W9N9");
+    expect(homeMemory.remoteRooms).toHaveLength(MAX_REMOTE_ROOMS);
   });
 });
 

@@ -1,4 +1,9 @@
-import { getRemoteCandidates, isRoomHostile, resolveRemoteRoom } from "../planning/remoteTargeting";
+import {
+  getRemoteCandidates,
+  isRoomHostile,
+  MAX_REMOTE_ROOMS,
+  resolveNextRemoteRoom
+} from "../planning/remoteTargeting";
 import { chebyshevDistance } from "../utils/grid";
 import { getCachedFind } from "../utils/roomCache";
 import { bodyCost, planBody, planMinerBody, planReserverBody, planScoutBody } from "./bodyPlanner";
@@ -176,21 +181,44 @@ export function decideRemoteSpawn(room: Room): SpawnDecision | null {
   Memory.rooms[room.name] = Memory.rooms[room.name] || {};
   const homeMemory = Memory.rooms[room.name];
 
-  // Short-circuit before touching Game.map at all once resolved - no need to
-  // re-derive the exit list every tick for a decision that's already been made.
-  if (homeMemory.remoteRoom) {
-    return decideNextRemoteSpawn(buildRemoteRoomState(room, homeMemory.remoteRoom));
+  const resolvedRooms = homeMemory.remoteRooms ?? [];
+  const states = resolvedRooms.map((remoteRoomName) => buildRemoteRoomState(room, remoteRoomName));
+
+  // A freshly-resolved room with zero reservers hasn't been staffed at all yet - it
+  // jumps ahead of every other resolved room's routine restaffing, mirroring
+  // decideNextRemoteSpawn's own "no reserver yet" unconditional pre-empt within a single
+  // room. Without this, strict list order below would let room 1's endless one-off
+  // replacement spawns starve a from-scratch room 2 indefinitely, since room 1 will
+  // almost always have *some* affordable need on any given tick.
+  const unbootstrapped = states.find((state) => state.reserverCount === 0);
+  if (unbootstrapped) {
+    const decision = decideNextRemoteSpawn(unbootstrapped);
+    if (decision) return decision;
   }
 
-  const candidates = getRemoteCandidates(room.name);
+  // Deliberate v1 simplification, not full round-robin fairness: room 1's outstanding
+  // need beats room 2's. The one case where that actually bites (a from-scratch room 2)
+  // is already covered by the bootstrap pre-empt above.
+  for (const state of states) {
+    const decision = decideNextRemoteSpawn(state);
+    if (decision) return decision;
+  }
+
+  // Short-circuit before touching Game.map or rescanning candidate memory at all once at
+  // cap - this room will never need a new target again.
+  if (resolvedRooms.length >= MAX_REMOTE_ROOMS) return null;
+
+  const candidates = getRemoteCandidates(room.name).filter(
+    (candidate) => !resolvedRooms.includes(candidate)
+  );
   const candidateMemories: Record<string, RoomMemory | undefined> = {};
   for (const candidate of candidates) {
     candidateMemories[candidate] = Memory.rooms[candidate];
   }
 
-  const remoteRoomName = resolveRemoteRoom(room.name, homeMemory, candidateMemories);
-  if (remoteRoomName) {
-    return decideNextRemoteSpawn(buildRemoteRoomState(room, remoteRoomName));
+  const newRemoteRoomName = resolveNextRemoteRoom(room.name, homeMemory, candidateMemories);
+  if (newRemoteRoomName) {
+    return decideNextRemoteSpawn(buildRemoteRoomState(room, newRemoteRoomName));
   }
 
   const liveScoutTargets = new Set(

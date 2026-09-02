@@ -35,6 +35,16 @@ const roleRunners: Record<CreepRole, (creep: Creep) => void> = {
 
 let seenHostileIds = new Set<string>();
 
+// Extracted from loop() for testability - flattens every owned room's remoteRooms list
+// into one set, since a room can now be *some* home room's remote target without being
+// the only one, or the only remote room that home room has.
+export function buildRemoteTargets(
+  ownedRooms: Room[],
+  memoryRooms: Record<string, RoomMemory | undefined>
+): Set<string> {
+  return new Set(ownedRooms.flatMap((room) => memoryRooms[room.name]?.remoteRooms ?? []));
+}
+
 export function loop(): void {
   runWithErrorLogging(() => {
     resetRoomCache();
@@ -51,11 +61,9 @@ export function loop(): void {
       roleRunners[creep.memory.role](creep);
     }
 
-    const remoteTargets = new Set(
-      Object.values(Game.rooms)
-        .filter((room) => room.controller?.my)
-        .map((room) => Memory.rooms[room.name]?.remoteRoom)
-        .filter((remoteRoom): remoteRoom is string => remoteRoom !== undefined)
+    const remoteTargets = buildRemoteTargets(
+      Object.values(Game.rooms).filter((room) => room.controller?.my),
+      Memory.rooms
     );
 
     for (const roomName in Game.rooms) {

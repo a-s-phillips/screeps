@@ -31,7 +31,7 @@ declare global {
     roadPlan?: { x: number; y: number }[];
     lastHostileSeenTick?: number;
     remoteIntel?: RemoteIntel;
-    remoteRoom?: string;
+    remoteRooms?: string[];
   }
 }
 
