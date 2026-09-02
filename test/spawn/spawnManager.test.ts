@@ -157,7 +157,10 @@ describe("decideNextSpawn", () => {
     // wait for the ideal, capacity-sized body to become affordable instead of
     // shrinking.
     const state = baseState({
-      creepCounts: { harvester: 1, upgrader: 0, builder: 0, hauler: 0, miner: 0 },
+      // upgrader held at 1-short-of-target (not severely under), so this test isolates
+      // harvester's own skip-not-downsize behavior without also exercising upgrader's -
+      // see the "sizes ... down when severely under target" tests for that.
+      creepCounts: { harvester: 1, upgrader: 1, builder: 0, hauler: 0, miner: 0 },
       energyAvailable: 300,
       energyCapacityAvailable: 800
     });
@@ -171,7 +174,9 @@ describe("decideNextSpawn", () => {
     // energy genuinely is flowing in, so it's fine to wait for the ideal,
     // capacity-sized body instead of shrinking.
     const state = baseState({
-      creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 1, miner: 1 },
+      // upgrader held at 1-short-of-target (not severely under), so this test isolates
+      // hauler's own skip-not-downsize behavior without also exercising upgrader's.
+      creepCounts: { harvester: 0, upgrader: 1, builder: 0, hauler: 1, miner: 1 },
       sourcesWithoutContainerCount: 0,
       containerCount: 2,
       energyAvailable: 300,
@@ -224,11 +229,47 @@ describe("decideNextSpawn", () => {
 
   it("still waits for full capacity when only one short of the hauler target, with a working economy", () => {
     const state = baseState({
-      creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 4, miner: 1 },
+      // upgrader held at 1-short-of-target (not severely under), so this test isolates
+      // hauler's own "one short still waits" behavior without also exercising upgrader's.
+      creepCounts: { harvester: 0, upgrader: 1, builder: 0, hauler: 4, miner: 1 },
       sourcesWithoutContainerCount: 0,
       containerCount: 5,
       energyAvailable: 450,
       energyCapacityAvailable: 1500
+    });
+
+    expect(decideNextSpawn(state)).toBeNull();
+  });
+
+  it("sizes the upgrader body down to fit available energy when severely under target, even with a working economy", () => {
+    // Found live on the official server: an upgrader target of 4 with 0 spawned still
+    // demanded a full-capacity (4-block, 800-energy) body no matter how close
+    // energyAvailable actually was - upgrader/builder weren't covered by the
+    // downsize-when-severely-under-target logic that harvester/hauler already had,
+    // so the deficit could never resolve. Since hasUnmetLocalNeed gates remote AND
+    // keeper spawning too, this silently deadlocked the whole spawn queue, not just
+    // upgraders - population fell from 14 to 5 creeps with zero replacements spawned.
+    const state = baseState({
+      creepCounts: { harvester: 2, upgrader: 0, builder: 0, hauler: 0, miner: 0 },
+      sourcesWithoutContainerCount: 0,
+      controllerLevel: 3, // target = min(3 + 1, 4) = 4
+      energyAvailable: 300,
+      energyCapacityAvailable: 800
+    });
+
+    const decision = decideNextSpawn(state);
+
+    expect(decision?.role).toBe("upgrader");
+    expect(decision?.body).toEqual([WORK, CARRY, MOVE]);
+  });
+
+  it("still waits for full capacity when only one short of the upgrader target, with a working economy", () => {
+    const state = baseState({
+      creepCounts: { harvester: 2, upgrader: 3, builder: 0, hauler: 0, miner: 0 },
+      sourcesWithoutContainerCount: 0,
+      controllerLevel: 3, // target = min(3 + 1, 4) = 4
+      energyAvailable: 300,
+      energyCapacityAvailable: 800
     });
 
     expect(decideNextSpawn(state)).toBeNull();

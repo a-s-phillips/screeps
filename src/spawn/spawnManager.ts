@@ -52,12 +52,12 @@ function builderTargetFor(state: RoomState): number {
   return Math.min(state.constructionSiteCount, BUILDER_TARGET_CAP);
 }
 
+type BuildRole = "harvester" | "hauler" | "upgrader" | "builder";
+
 // Shared by decideNextSpawn and hasUnmetLocalNeed so the two can't drift out of sync -
 // sizing capacity is deliberately left out here, since "is anything under target"
 // doesn't depend on what body size would be affordable for it.
-function buildRoleTargets(
-  state: RoomState
-): { role: "harvester" | "hauler" | "upgrader" | "builder"; target: number }[] {
+function buildRoleTargets(state: RoomState): { role: BuildRole; target: number }[] {
   return [
     { role: "harvester", target: harvesterTargetFor(state) },
     { role: "hauler", target: state.containerCount },
@@ -146,8 +146,13 @@ export function decideNextSpawn(state: RoomState): SpawnDecision | null {
   // live: with a hauler target of 5 and only 1 spawned, a single hauler couldn't grow
   // energyAvailable fast enough to ever afford a second at full size, leaving the room
   // hauler-starved for hundreds of ticks. Being more than one creep short of target is
-  // treated the same as not having a working economy at all: downsize now rather than wait.
-  function feederSizingCapacity(role: "harvester" | "hauler", target: number): number {
+  // treated the same as not having a working economy at all: downsize now rather than
+  // wait. Applies to every buildRoleTargets role, not just harvester/hauler - found live
+  // on the official server: a severely-under-target upgrader (0 of 4) still demanded a
+  // full-capacity body no matter how small the gap between energyAvailable and that cost,
+  // which starved not just upgraders but everything downstream of hasUnmetLocalNeed too
+  // (remote and keeper spawning both gate on it), since the deficit could never resolve.
+  function feederSizingCapacity(role: BuildRole, target: number): number {
     const severelyUnderTarget = target - state.creepCounts[role] > 1;
     return hasWorkingEconomy && !severelyUnderTarget
       ? state.energyCapacityAvailable
@@ -157,12 +162,7 @@ export function decideNextSpawn(state: RoomState): SpawnDecision | null {
   for (const { role, target } of buildRoleTargets(state)) {
     if (state.creepCounts[role] >= target) continue;
 
-    const sizingCapacity =
-      role === "harvester" || role === "hauler"
-        ? feederSizingCapacity(role, target)
-        : state.energyCapacityAvailable;
-
-    const body = planBody(role, sizingCapacity);
+    const body = planBody(role, feederSizingCapacity(role, target));
     if (body.length > 0 && bodyCost(body) <= state.energyAvailable) return { role, body };
   }
 
