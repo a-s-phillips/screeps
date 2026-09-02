@@ -330,6 +330,33 @@ describe("hasUnmetLocalNeed", () => {
 
     expect(hasUnmetLocalNeed(state)).toBe(false);
   });
+
+  it("is false when a role is only one short of target, not blocking remote spawning for a gap that's close enough", () => {
+    // Found live on pserver: upgrader target 4, only 3 spawned, and the room cycled
+    // between 3 and 4 almost continuously (each 4th upgrader costs a full-capacity
+    // 1800-energy body, which took ~120 ticks to reaccumulate every time one died and
+    // got replaced) - under the old "any deficit blocks remote spawning" rule, remote
+    // expansion got almost no opportunities to ever run. A 1-short gap is treated the
+    // same as decideNextSpawn's own "close enough to wait for quality" threshold
+    // (feederSizingCapacity's severelyUnderTarget check) - not unmet enough to matter.
+    const state = baseState({
+      sourcesWithoutContainerCount: 0,
+      controllerLevel: 3, // target = min(3 + 1, 4) = 4
+      creepCounts: { harvester: 0, upgrader: 3, builder: 0, hauler: 0, miner: 0 }
+    });
+
+    expect(hasUnmetLocalNeed(state)).toBe(false);
+  });
+
+  it("is still true when a role is more than one short of target", () => {
+    const state = baseState({
+      sourcesWithoutContainerCount: 0,
+      controllerLevel: 3, // target = min(3 + 1, 4) = 4
+      creepCounts: { harvester: 0, upgrader: 1, builder: 0, hauler: 0, miner: 0 }
+    });
+
+    expect(hasUnmetLocalNeed(state)).toBe(true);
+  });
 });
 
 describe("runSpawning", () => {

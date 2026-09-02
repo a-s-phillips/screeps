@@ -62,9 +62,17 @@ function buildRoleTargets(
 // "Fully staffed" and "something's needed but unaffordable at the ideal body size right
 // now" both make decideNextSpawn return null - conflating them would let remote spawning
 // spend energy the home room was just deemed too poor to spend on its own unmet need.
+//
+// A role only one creep short of target doesn't count as unmet, though - it's treated
+// the same as decideNextSpawn's own "close enough to wait for the ideal body" threshold
+// (feederSizingCapacity's severelyUnderTarget check). Found live: a room's upgrader
+// target (4) sat at 3 almost continuously, since each 4th upgrader needs a full-capacity
+// 1800-energy body that took ~120 ticks to reaccumulate every time one died and got
+// replaced - under a strict "any deficit blocks remote spawning" rule, remote expansion
+// got almost no opportunities to ever run.
 export function hasUnmetLocalNeed(state: RoomState): boolean {
   if (state.sourcesNeedingMiner.length > 0) return true;
-  return buildRoleTargets(state).some(({ role, target }) => state.creepCounts[role] < target);
+  return buildRoleTargets(state).some(({ role, target }) => target - state.creepCounts[role] > 1);
 }
 
 export function decideNextSpawn(state: RoomState): SpawnDecision | null {
