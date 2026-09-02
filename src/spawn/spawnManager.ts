@@ -89,7 +89,11 @@ export function decideNextSpawn(state: RoomState): SpawnDecision | null {
   const harvesterTarget = harvesterTargetFor(state);
   const haulerTarget = state.containerCount;
 
-  const targets: { role: Exclude<CreepRole, "miner">; target: number; sizingCapacity: number }[] = [
+  const targets: {
+    role: "harvester" | "hauler" | "upgrader" | "builder";
+    target: number;
+    sizingCapacity: number;
+  }[] = [
     {
       role: "harvester",
       target: harvesterTarget,
@@ -148,12 +152,18 @@ function recycleSurplusHarvesters(
 export function runSpawning(spawn: StructureSpawn, room: Room): void {
   if (spawn.spawning) return;
 
+  // scout/reserver/remoteHarvester are remote-only roles, tracked separately by the
+  // remote spawn pass (their memory.remoteRoom, not creep.room, is what matters for
+  // counting them) - present here at 0 only to satisfy Record<CreepRole, number>.
   const creepCounts: Record<CreepRole, number> = {
     harvester: 0,
     upgrader: 0,
     builder: 0,
     hauler: 0,
-    miner: 0
+    miner: 0,
+    scout: 0,
+    reserver: 0,
+    remoteHarvester: 0
   };
   const harvesterCreeps: Creep[] = [];
   // Tracks the healthiest (highest ticksToLive) miner currently assigned to each

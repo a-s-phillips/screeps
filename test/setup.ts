@@ -1,7 +1,24 @@
+// Screeps injects RoomPosition as a real class at runtime; @types/screeps only declares
+// its type (globally, as `RoomPosition`), so tests need a minimal stand-in - under a
+// different local name to avoid colliding with that ambient type declaration - to
+// construct instances the same way production code does (`new RoomPosition(x, y, roomName)`).
+class RoomPositionStub {
+  x: number;
+  y: number;
+  roomName: string;
+
+  constructor(x: number, y: number, roomName: string) {
+    this.x = x;
+    this.y = y;
+    this.roomName = roomName;
+  }
+}
+
 // Screeps injects these as real globals at runtime; @types/screeps only
 // declares their types (`declare const X: Y`), so tests need the actual
 // values polyfilled to reference them the same way production code does.
 Object.assign(globalThis, {
+  RoomPosition: RoomPositionStub,
   OK: 0,
   ERR_NOT_IN_RANGE: -9,
   ERR_NOT_ENOUGH_RESOURCES: -6,

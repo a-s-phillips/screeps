@@ -2,6 +2,20 @@ import { chebyshevDistance } from "../utils/grid";
 import { getCachedFind } from "../utils/roomCache";
 
 export const MOVE_OPTS: MoveToOpts = { reusePath: 5 };
+// Cross-room trips are long and mostly unroaded/static terrain, so a much longer path
+// cache is worth it - a local reusePath of 5 would recompute the whole route far more
+// often than the terrain along the way ever actually changes.
+export const REMOTE_MOVE_OPTS: MoveToOpts = { reusePath: 20 };
+
+// Room center is a deliberately arbitrary waypoint - the creep doesn't care about a
+// specific tile, just crossing the border, and moveTo paths across rooms it has no
+// vision of via static map exit topology, then refines once it arrives.
+export function travelToRoom(creep: Creep, roomName: string): boolean {
+  if (creep.room.name === roomName) return true;
+
+  creep.moveTo(new RoomPosition(25, 25, roomName), REMOTE_MOVE_OPTS);
+  return false;
+}
 
 export function decideWorkingState(
   currentlyWorking: boolean,

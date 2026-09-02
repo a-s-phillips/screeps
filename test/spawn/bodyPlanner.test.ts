@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { bodyCost, planBody, planMinerBody } from "../../src/spawn/bodyPlanner";
+import {
+  bodyCost,
+  planBody,
+  planMinerBody,
+  planReserverBody,
+  planScoutBody
+} from "../../src/spawn/bodyPlanner";
 
 describe("planBody", () => {
   it("returns an empty body when there isn't enough energy capacity for even one block", () => {
@@ -66,6 +72,40 @@ describe("planMinerBody", () => {
     // to hit (unlike the shared-block harvester body, which under-saturates at 4).
     expect(planMinerBody(550)).toEqual([WORK, WORK, WORK, WORK, WORK, MOVE]);
     expect(planMinerBody(50_000)).toEqual([WORK, WORK, WORK, WORK, WORK, MOVE]);
+  });
+});
+
+describe("planBody for remoteHarvester", () => {
+  it("uses a 1:1 MOVE ratio, unlike the local harvester's 2 WORK to 1 MOVE", () => {
+    // No remote roads in v1 - a 1:1 ratio of MOVE to non-MOVE parts keeps the creep at
+    // full speed on plain terrain even fully loaded, unlike the local harvester's
+    // lighter 3:1 ratio (fine locally, since roads eventually cover that route).
+    expect(planBody("remoteHarvester", 250)).toEqual([WORK, CARRY, MOVE, MOVE]);
+  });
+
+  it("repeats the block as capacity allows", () => {
+    expect(planBody("remoteHarvester", 500)).toEqual([
+      WORK,
+      CARRY,
+      MOVE,
+      MOVE,
+      WORK,
+      CARRY,
+      MOVE,
+      MOVE
+    ]);
+  });
+});
+
+describe("planScoutBody", () => {
+  it("is always a single MOVE part, regardless of capacity", () => {
+    expect(planScoutBody()).toEqual([MOVE]);
+  });
+});
+
+describe("planReserverBody", () => {
+  it("is always CLAIM + MOVE, regardless of capacity", () => {
+    expect(planReserverBody()).toEqual([CLAIM, MOVE]);
   });
 });
 

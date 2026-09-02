@@ -7,6 +7,8 @@ import {
   gatherEnergy,
   harvestFromNearestSource,
   MOVE_OPTS,
+  REMOTE_MOVE_OPTS,
+  travelToRoom,
   withdrawFromFullestContainer
 } from "../../src/roles/shared";
 import { resetRoomCache } from "../../src/utils/roomCache";
@@ -557,6 +559,36 @@ describe("withdrawFromFullestContainer", () => {
     expect(creep.withdraw).toHaveBeenCalledWith(
       expect.objectContaining({ id: "near" }),
       RESOURCE_ENERGY
+    );
+  });
+});
+
+function mockTravelCreep(roomName: string) {
+  return {
+    room: { name: roomName },
+    moveTo: vi.fn()
+  } as unknown as Creep;
+}
+
+describe("travelToRoom", () => {
+  it("returns true and does not move when already in the target room", () => {
+    const creep = mockTravelCreep("W1N1");
+
+    const arrived = travelToRoom(creep, "W1N1");
+
+    expect(arrived).toBe(true);
+    expect(creep.moveTo).not.toHaveBeenCalled();
+  });
+
+  it("returns false and moves toward the target room's center when not there yet", () => {
+    const creep = mockTravelCreep("W1N1");
+
+    const arrived = travelToRoom(creep, "W2N1");
+
+    expect(arrived).toBe(false);
+    expect(creep.moveTo).toHaveBeenCalledWith(
+      expect.objectContaining({ x: 25, y: 25, roomName: "W2N1" }),
+      REMOTE_MOVE_OPTS
     );
   });
 });

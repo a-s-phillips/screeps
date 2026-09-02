@@ -1,10 +1,18 @@
-// Miner is deliberately excluded: it doesn't fit the symmetric block-repeat model these
-// roles share (see planMinerBody, which plans its asymmetric body independently).
-const BASE_BLOCKS: Record<Exclude<CreepRole, "miner">, BodyPartConstant[]> = {
+// Miner, scout, and reserver are deliberately excluded: miner doesn't fit the symmetric
+// block-repeat model these roles share (see planMinerBody, which plans its asymmetric
+// body independently); scout/reserver are small fixed bodies that never scale with
+// capacity (see planScoutBody/planReserverBody).
+type BlockRole = Exclude<CreepRole, "miner" | "scout" | "reserver">;
+
+// remoteHarvester uses a 1:1 MOVE ratio, unlike the local harvester's lighter 2 WORK to
+// 1 MOVE - v1 has no remote roads, so full speed on plain terrain even fully loaded
+// matters more than it does locally, where roads eventually cover the route.
+const BASE_BLOCKS: Record<BlockRole, BodyPartConstant[]> = {
   harvester: [WORK, WORK, CARRY, MOVE],
   upgrader: [WORK, CARRY, MOVE],
   builder: [WORK, CARRY, MOVE],
-  hauler: [CARRY, MOVE]
+  hauler: [CARRY, MOVE],
+  remoteHarvester: [WORK, CARRY, MOVE, MOVE]
 };
 
 // A source regenerates SOURCE_ENERGY_CAPACITY every ENERGY_REGEN_TIME ticks; each WORK
@@ -15,7 +23,7 @@ const SOURCE_SATURATION_WORK = Math.ceil(
   SOURCE_ENERGY_CAPACITY / ENERGY_REGEN_TIME / HARVEST_POWER
 );
 
-const ROLE_MAX_REPEATS: Partial<Record<Exclude<CreepRole, "miner">, number>> = {
+const ROLE_MAX_REPEATS: Partial<Record<BlockRole, number>> = {
   harvester: Math.floor(
     SOURCE_SATURATION_WORK / BASE_BLOCKS.harvester.filter((p) => p === WORK).length
   )
@@ -44,10 +52,15 @@ export function planMinerBody(energyCapacityAvailable: number): BodyPartConstant
   return body;
 }
 
-export function planBody(
-  role: Exclude<CreepRole, "miner">,
-  energyCapacityAvailable: number
-): BodyPartConstant[] {
+export function planScoutBody(): BodyPartConstant[] {
+  return [MOVE];
+}
+
+export function planReserverBody(): BodyPartConstant[] {
+  return [CLAIM, MOVE];
+}
+
+export function planBody(role: BlockRole, energyCapacityAvailable: number): BodyPartConstant[] {
   const block = BASE_BLOCKS[role];
   const cost = bodyCost(block);
 
