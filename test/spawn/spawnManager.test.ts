@@ -13,7 +13,7 @@ vi.mock("../../src/logging/logger", () => ({ log: vi.fn() }));
 
 function baseState(overrides: Partial<RoomState> = {}): RoomState {
   return {
-    creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 0, miner: 0 },
+    creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 0, miner: 0, defender: 0 },
     sourcesWithoutContainerCount: 1,
     sourcesNeedingMiner: [],
     constructionSiteCount: 0,
@@ -23,6 +23,8 @@ function baseState(overrides: Partial<RoomState> = {}): RoomState {
     // RCL1, matching upgraderTargetFor's min(controllerLevel + 1, cap) - keeps every
     // pre-existing test's implicit "upgrader target is 2" assumption intact.
     controllerLevel: 1,
+    hostileCreepCount: 0,
+    hostileRecentlySeen: false,
     ...overrides
   };
 }
@@ -302,6 +304,85 @@ describe("decideNextSpawn", () => {
     expect(decision?.role).toBe("hauler");
     expect(decision?.body).toEqual([CARRY, MOVE]);
   });
+
+  describe("defender - active threat (tier 1)", () => {
+    it("preempts a needed miner when a hostile is live in the room", () => {
+      const state = baseState({
+        sourcesNeedingMiner: ["source1" as Id<Source>],
+        hostileCreepCount: 1
+      });
+
+      const decision = decideNextSpawn(state);
+
+      expect(decision?.role).toBe("defender");
+    });
+
+    it("preempts an under-target economy role when a hostile is live in the room", () => {
+      const state = baseState({ hostileCreepCount: 1 });
+
+      const decision = decideNextSpawn(state);
+
+      expect(decision?.role).toBe("defender");
+    });
+
+    it("caps the target at DEFENDER_TARGET_CAP even with many more hostiles present", () => {
+      const state = baseState({
+        hostileCreepCount: 10,
+        creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 0, miner: 0, defender: 3 }
+      });
+
+      const decision = decideNextSpawn(state);
+
+      expect(decision?.role).not.toBe("defender");
+    });
+
+    it("does not spawn another defender once the live-capped target is met", () => {
+      const state = baseState({
+        hostileCreepCount: 1,
+        creepCounts: { harvester: 0, upgrader: 0, builder: 0, hauler: 0, miner: 0, defender: 1 }
+      });
+
+      const decision = decideNextSpawn(state);
+
+      expect(decision?.role).not.toBe("defender");
+      // Falls through to the normal priority order once the defender need is met.
+      expect(decision?.role).toBe("harvester");
+    });
+  });
+
+  describe("defender - sticky recent sighting (tier 2)", () => {
+    it("does not preempt an economy deficit when only recently (not currently) hostile", () => {
+      const state = baseState({ hostileRecentlySeen: true });
+
+      const decision = decideNextSpawn(state);
+
+      expect(decision?.role).toBe("harvester");
+    });
+
+    it("spawns a sticky defender once every other role target is already met", () => {
+      const state = baseState({
+        hostileRecentlySeen: true,
+        sourcesWithoutContainerCount: 0,
+        creepCounts: { harvester: 0, upgrader: 2, builder: 0, hauler: 0, miner: 0, defender: 0 }
+      });
+
+      const decision = decideNextSpawn(state);
+
+      expect(decision?.role).toBe("defender");
+    });
+
+    it("does not spawn a second sticky defender once one already exists", () => {
+      const state = baseState({
+        hostileRecentlySeen: true,
+        sourcesWithoutContainerCount: 0,
+        creepCounts: { harvester: 0, upgrader: 2, builder: 0, hauler: 0, miner: 0, defender: 1 }
+      });
+
+      const decision = decideNextSpawn(state);
+
+      expect(decision).toBeNull();
+    });
+  });
 });
 
 describe("hasUnmetLocalNeed", () => {
@@ -356,6 +437,17 @@ describe("hasUnmetLocalNeed", () => {
     });
 
     expect(hasUnmetLocalNeed(state)).toBe(true);
+  });
+
+  it("is unaffected by defender/hostile state in either direction - a missing defender never blocks remote spawning", () => {
+    const withoutDefenderUnderActiveThreat = baseState({
+      sourcesWithoutContainerCount: 0,
+      creepCounts: { harvester: 0, upgrader: 2, builder: 0, hauler: 0, miner: 0, defender: 0 },
+      hostileCreepCount: 5,
+      hostileRecentlySeen: true
+    });
+
+    expect(hasUnmetLocalNeed(withoutDefenderUnderActiveThreat)).toBe(false);
   });
 });
 

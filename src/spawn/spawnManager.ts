@@ -1,4 +1,5 @@
 import { log } from "../logging/logger";
+import { isLocalHostileRecentlySeen } from "../planning/roomPlanner";
 import { chebyshevDistance } from "../utils/grid";
 import { getCachedFind } from "../utils/roomCache";
 import { bodyCost, planBody, planMinerBody } from "./bodyPlanner";
@@ -17,7 +18,12 @@ export interface RoomState {
   energyAvailable: number;
   energyCapacityAvailable: number;
   controllerLevel: number;
+  hostileCreepCount: number;
+  hostileRecentlySeen: boolean;
 }
+
+// Live-capped so a swarm doesn't queue an unbounded number of defenders.
+const DEFENDER_TARGET_CAP = 3;
 
 // A source with a built container gets a miner instead (see planMinerBody) - it hits
 // the true saturation cap alone, so mobile harvesters are only needed for sources that
@@ -75,7 +81,40 @@ export function hasUnmetLocalNeed(state: RoomState): boolean {
   return buildRoleTargets(state).some(({ role, target }) => target - state.creepCounts[role] > 1);
 }
 
+// A defender to fight is worth pre-empting even a starving economy for - checked
+// before everything else, including the miner bootstrap check. Capped at the live
+// hostile count (not spawned past what's actually there) so a lone Invader doesn't
+// trigger a full DEFENDER_TARGET_CAP-sized garrison.
+function decideActiveThreatDefender(state: RoomState): SpawnDecision | null {
+  if (state.hostileCreepCount === 0) return null;
+
+  const target = Math.min(state.hostileCreepCount, DEFENDER_TARGET_CAP);
+  if (state.creepCounts.defender >= target) return null;
+
+  const body = planBody("defender", state.energyCapacityAvailable);
+  if (body.length === 0 || bodyCost(body) > state.energyAvailable) return null;
+
+  return { role: "defender", body };
+}
+
+// A hostile seen recently but not live right now doesn't justify preempting economy
+// roles - unlike decideActiveThreatDefender, this is only ever tried as a last resort,
+// after every other role's target is already met. Keeps exactly one defender around
+// for a while after a sighting ages, in case the same threat comes back, without ever
+// competing with an actual economy deficit for the same spawn slot.
+function decideStickyDefender(state: RoomState): SpawnDecision | null {
+  if (!state.hostileRecentlySeen || state.creepCounts.defender >= 1) return null;
+
+  const body = planBody("defender", state.energyCapacityAvailable);
+  if (body.length === 0 || bodyCost(body) > state.energyAvailable) return null;
+
+  return { role: "defender", body };
+}
+
 export function decideNextSpawn(state: RoomState): SpawnDecision | null {
+  const activeThreatDefender = decideActiveThreatDefender(state);
+  if (activeThreatDefender) return activeThreatDefender;
+
   // A harvester alone can grow the spawn's energy (it self-delivers), and so can a
   // miner+hauler pair (miner fills a container, hauler relays it) - but a hauler
   // *without* a miner has nothing to haul, and a miner *without* a hauler just piles
@@ -126,7 +165,7 @@ export function decideNextSpawn(state: RoomState): SpawnDecision | null {
     if (body.length > 0 && bodyCost(body) <= state.energyAvailable) return { role, body };
   }
 
-  return null;
+  return decideStickyDefender(state);
 }
 
 // Harvesters pick "nearest active source" fresh each tick rather than sticking to one
@@ -160,7 +199,9 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
   // what matters for counting them) - present here at 0 only to satisfy
   // Record<CreepRole, number>. A remote miner is also excluded from this room's own
   // count naturally, since it physically sits in the remote room (creep.room.name !==
-  // room.name below).
+  // room.name below). defender is a genuine home-room role (unlike the above) - its 0
+  // here is just the loop's usual starting point, incremented below like every other
+  // local role.
   const creepCounts: Record<CreepRole, number> = {
     harvester: 0,
     upgrader: 0,
@@ -170,7 +211,8 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     scout: 0,
     reserver: 0,
     remoteHarvester: 0,
-    remoteHauler: 0
+    remoteHauler: 0,
+    defender: 0
   };
   const harvesterCreeps: Creep[] = [];
   // Tracks the healthiest (highest ticksToLive) miner currently assigned to each
@@ -273,7 +315,12 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     containerCount: containers.length,
     energyAvailable: room.energyAvailable,
     energyCapacityAvailable: room.energyCapacityAvailable,
-    controllerLevel: room.controller?.level ?? 0
+    controllerLevel: room.controller?.level ?? 0,
+    hostileCreepCount: getCachedFind(room, FIND_HOSTILE_CREEPS).length,
+    hostileRecentlySeen: isLocalHostileRecentlySeen(
+      Memory.rooms[room.name]?.lastHostileSeenTick,
+      Game.time
+    )
   };
 
   const excessHarvesters = creepCounts.harvester - harvesterTargetFor(state);
