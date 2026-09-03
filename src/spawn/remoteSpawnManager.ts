@@ -1,6 +1,7 @@
 import {
   getRemoteCandidates,
   isRoomHostile,
+  isRoomOwnedByOther,
   MAX_REMOTE_ROOMS,
   resolveNextRemoteRoom
 } from "../planning/remoteTargeting";
@@ -34,6 +35,7 @@ export interface RemoteRoomState {
   homeRoomName: string;
   remoteRoomName: string;
   hostileRecentlySeen: boolean;
+  ownedByOther: boolean;
   reserverCount: number;
   remoteHarvesterCount: number;
   remoteHaulerCount: number;
@@ -79,7 +81,8 @@ function buildRemoteSourceState(
 }
 
 export function buildRemoteRoomState(homeRoom: Room, remoteRoomName: string): RemoteRoomState {
-  const lastHostileSeenTick = Memory.rooms[remoteRoomName]?.lastHostileSeenTick;
+  const remoteMemory = Memory.rooms[remoteRoomName];
+  const lastHostileSeenTick = remoteMemory?.lastHostileSeenTick;
 
   let reserverCount = 0;
   let remoteHarvesterCount = 0;
@@ -100,6 +103,7 @@ export function buildRemoteRoomState(homeRoom: Room, remoteRoomName: string): Re
     homeRoomName: homeRoom.name,
     remoteRoomName,
     hostileRecentlySeen: isRoomHostile(lastHostileSeenTick, Game.time),
+    ownedByOther: isRoomOwnedByOther(remoteMemory?.remoteIntel),
     reserverCount,
     remoteHarvesterCount,
     remoteHaulerCount,
@@ -120,7 +124,7 @@ export function buildRemoteRoomState(homeRoom: Room, remoteRoomName: string): Re
 // hostileRecentlySeen only pauses *new* spawns (see roles/shared.ts's
 // retreatFromHostileRemote for what happens to creeps already assigned).
 export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | null {
-  if (state.hostileRecentlySeen) return null;
+  if (state.hostileRecentlySeen || state.ownedByOther) return null;
 
   if (state.reserverCount === 0) {
     const body = planReserverBody();

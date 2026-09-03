@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getRemoteCandidates,
   isRoomHostile,
+  isRoomOwnedByOther,
   MAX_REMOTE_ROOMS,
   pickBestCandidate,
   recordRemoteIntel,
@@ -249,6 +250,20 @@ describe("isRoomHostile", () => {
 
   it("is false just past the window boundary", () => {
     expect(isRoomHostile(1000, 1000 + REMOTE_HOSTILE_MEMORY_WINDOW + 1)).toBe(false);
+  });
+});
+
+describe("isRoomOwnedByOther", () => {
+  it("is false when no intel has been recorded yet", () => {
+    expect(isRoomOwnedByOther(undefined)).toBe(false);
+  });
+
+  it("is false when the room is not owned by another player", () => {
+    expect(isRoomOwnedByOther(intel({ ownedByOther: false }))).toBe(false);
+  });
+
+  it("is true when the room is owned by another player", () => {
+    expect(isRoomOwnedByOther(intel({ ownedByOther: true }))).toBe(true);
   });
 });
 

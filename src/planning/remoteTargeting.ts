@@ -13,6 +13,12 @@ export function isRoomHostile(lastHostileSeenTick: number | undefined, now: numb
   );
 }
 
+// Unlike isRoomHostile, this has no recency window - a room another player has claimed
+// doesn't "age out" back into safety on its own the way a passing hostile sighting does.
+export function isRoomOwnedByOther(remoteIntel: RemoteIntel | undefined): boolean {
+  return remoteIntel?.ownedByOther === true;
+}
+
 // Static map exit topology - no vision required, works for a room the bot has never seen.
 export function getRemoteCandidates(homeRoomName: string): string[] {
   const exits = Game.map.describeExits(homeRoomName);

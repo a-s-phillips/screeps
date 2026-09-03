@@ -253,6 +253,7 @@ function baseRemoteState(overrides: Partial<RemoteRoomState> = {}): RemoteRoomSt
     homeRoomName: "W9N8",
     remoteRoomName: "W8N8",
     hostileRecentlySeen: false,
+    ownedByOther: false,
     reserverCount: 0,
     remoteHarvesterCount: 0,
     remoteHaulerCount: 0,
@@ -324,6 +325,12 @@ describe("decideNextRemoteSpawn", () => {
 
   it("returns null when a hostile has been seen recently in the remote room, even with no reserver", () => {
     const decision = decideNextRemoteSpawn(baseRemoteState({ hostileRecentlySeen: true }));
+
+    expect(decision).toBeNull();
+  });
+
+  it("returns null when the remote room is owned by another player, even with no reserver", () => {
+    const decision = decideNextRemoteSpawn(baseRemoteState({ ownedByOther: true }));
 
     expect(decision).toBeNull();
   });
@@ -410,6 +417,35 @@ describe("buildRemoteRoomState", () => {
     const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
 
     expect(state.hostileRecentlySeen).toBe(false);
+  });
+
+  it("reports ownedByOther from recorded remote intel", () => {
+    vi.stubGlobal("Game", { time: 1000, creeps: {}, rooms: {} });
+    vi.stubGlobal("Memory", {
+      rooms: {
+        W8N8: {
+          remoteIntel: {
+            ownedByOther: true,
+            sourceCount: 1,
+            reservedByOther: false,
+            hasSourceKeeper: false
+          }
+        }
+      }
+    });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.ownedByOther).toBe(true);
+  });
+
+  it("defaults ownedByOther to false when no intel has been recorded yet", () => {
+    vi.stubGlobal("Game", { time: 1000, creeps: {}, rooms: {} });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.ownedByOther).toBe(false);
   });
 
   it("computes sourcesWithoutContainerCount, sourcesNeedingMiner, and remoteContainerCount from live vision", () => {

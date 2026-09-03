@@ -122,6 +122,25 @@ describe("retreatFromHostileRemote", () => {
     expect(retreated).toBe(true);
     expect(creep.moveTo).not.toHaveBeenCalled();
   });
+
+  // A room another player has claimed is never coming back without a fight this role
+  // isn't equipped for, unlike a hostile sighting, which ages out on its own - so this
+  // has no recency window, just a flat "is someone else's now" check.
+  it("heads toward the home room when the remote room is owned by another player, with no hostile sighting at all", () => {
+    vi.stubGlobal("Game", { time: 1000 });
+    vi.stubGlobal("Memory", {
+      rooms: { W2N1: { remoteIntel: { ownedByOther: true, sourceCount: 1, reservedByOther: false, hasSourceKeeper: false } } }
+    });
+    const creep = mockRetreatingCreep();
+
+    const retreated = retreatFromHostileRemote(creep, "W2N1", "W1N1");
+
+    expect(retreated).toBe(true);
+    expect(creep.moveTo).toHaveBeenCalledWith(
+      expect.objectContaining({ roomName: "W1N1" }),
+      REMOTE_MOVE_OPTS
+    );
+  });
 });
 
 describe("decideWorkingState", () => {
