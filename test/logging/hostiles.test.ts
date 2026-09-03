@@ -76,4 +76,38 @@ describe("recordHostileSighting", () => {
 
     expect(memory.lastHostileSeenTick).toBe(100);
   });
+
+  // A reserver (claim + move) sitting on a remote room's controller is a permanent,
+  // harmless presence - counting it as "hostile" would keep isRoomHostile() true
+  // forever and permanently evict our own remote creeps from an otherwise-safe room.
+  it("does not touch lastHostileSeenTick when the only creeps present are unarmed", () => {
+    vi.stubGlobal("Game", { time: 12345 });
+    const reserver = mockHostile("h1", "SomePlayer", "W1N1", [CLAIM, MOVE]);
+    const memory: RoomMemory = {};
+
+    recordHostileSighting(memory, [reserver]);
+
+    expect(memory.lastHostileSeenTick).toBeUndefined();
+  });
+
+  it("stamps lastHostileSeenTick when a ranged attacker is present", () => {
+    vi.stubGlobal("Game", { time: 12345 });
+    const attacker = mockHostile("h1", "SomePlayer", "W1N1", [RANGED_ATTACK, MOVE]);
+    const memory: RoomMemory = {};
+
+    recordHostileSighting(memory, [attacker]);
+
+    expect(memory.lastHostileSeenTick).toBe(12345);
+  });
+
+  it("stamps lastHostileSeenTick when at least one of several creeps is armed", () => {
+    vi.stubGlobal("Game", { time: 12345 });
+    const reserver = mockHostile("h1", "SomePlayer", "W1N1", [CLAIM, MOVE]);
+    const attacker = mockHostile("h2", "SomePlayer", "W1N1", [ATTACK, MOVE]);
+    const memory: RoomMemory = {};
+
+    recordHostileSighting(memory, [reserver, attacker]);
+
+    expect(memory.lastHostileSeenTick).toBe(12345);
+  });
 });

@@ -35,8 +35,18 @@ export function detectNewHostiles(
   return { sightings, seenIds };
 }
 
+// A remote room has no towers/ramparts, so an unarmed foreign creep (a reserver
+// squatting on the controller, a scout passing through) poses no actual threat there -
+// only ATTACK/RANGED_ATTACK parts mean a creep can hurt something. Distinguishing this
+// matters because a reserver's presence is often permanent: counting it as "hostile"
+// would keep isRoomHostile() true forever and permanently evict our own remote creeps
+// from a room that's merely reserved, not actually dangerous.
+function isThreatening(creep: Creep): boolean {
+  return creep.body.some((part) => part.type === ATTACK || part.type === RANGED_ATTACK);
+}
+
 export function recordHostileSighting(memory: RoomMemory, hostiles: Creep[]): void {
-  if (hostiles.length > 0) {
+  if (hostiles.some(isThreatening)) {
     memory.lastHostileSeenTick = Game.time;
   }
 }
