@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { run } from "../../src/roles/keeperHarvester";
 import { MOVE_OPTS, REMOTE_MOVE_OPTS } from "../../src/roles/shared";
 import { resetRoomCache } from "../../src/utils/roomCache";
@@ -60,6 +60,10 @@ function mockCreep(opts: {
 describe("keeperHarvester role", () => {
   beforeEach(() => {
     resetRoomCache();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("does nothing while gathering if no remote room is assigned", () => {
@@ -129,6 +133,68 @@ describe("keeperHarvester role", () => {
       REMOTE_MOVE_OPTS
     );
     expect(creep.harvest).not.toHaveBeenCalled();
+  });
+
+  it("does not immediately head back toward the remote room the tick after retreating", () => {
+    // Found live: without a persisted cooldown, the creep's very next tick re-attempts
+    // travelToRoom(remoteRoom) unconditionally before the safety check ever runs again,
+    // undoing the retreat it just started and thrashing back and forth across the room
+    // border for its whole remaining life without ever getting a real chance to wait out
+    // an unsafe window.
+    vi.stubGlobal("Game", { time: 1000 });
+    const creep = mockCreep({
+      working: false,
+      usedEnergy: 0,
+      freeCapacity: 50,
+      roomName: "W1N1",
+      homeRoom: "W1N1",
+      remoteRoom: "W2N1",
+      hostiles: [{ id: "h1", owner: { username: "SomePlayer" }, pos: { x: 10, y: 10 } }]
+    });
+    creep.memory.keeperRetreatUntil = 1050;
+
+    run(creep);
+
+    expect(creep.moveTo).not.toHaveBeenCalledWith(
+      expect.objectContaining({ roomName: "W2N1" }),
+      REMOTE_MOVE_OPTS
+    );
+  });
+
+  it("sets a retreat cooldown when retreating from a hostile", () => {
+    vi.stubGlobal("Game", { time: 1000 });
+    const creep = mockCreep({
+      working: false,
+      usedEnergy: 0,
+      freeCapacity: 50,
+      roomName: "W2N1",
+      homeRoom: "W1N1",
+      remoteRoom: "W2N1",
+      hostiles: [{ id: "h1", owner: { username: "SomePlayer" }, pos: { x: 10, y: 10 } }]
+    });
+
+    run(creep);
+
+    expect(creep.memory.keeperRetreatUntil).toBeGreaterThan(1000);
+  });
+
+  it("resumes heading to the remote room once the retreat cooldown has passed", () => {
+    vi.stubGlobal("Game", { time: 1051 });
+    const creep = mockCreep({
+      working: false,
+      usedEnergy: 0,
+      freeCapacity: 50,
+      roomName: "W1N1",
+      remoteRoom: "W2N1"
+    });
+    creep.memory.keeperRetreatUntil = 1050;
+
+    run(creep);
+
+    expect(creep.moveTo).toHaveBeenCalledWith(
+      expect.objectContaining({ roomName: "W2N1" }),
+      REMOTE_MOVE_OPTS
+    );
   });
 
   it("does not retreat from a Source Keeper creep outside the retreat radius", () => {
@@ -299,10 +365,7 @@ describe("keeperHarvester role", () => {
 
     run(creep);
 
-    expect(creep.moveTo).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "s1" }),
-      MOVE_OPTS
-    );
+    expect(creep.moveTo).toHaveBeenCalledWith(expect.objectContaining({ id: "s1" }), MOVE_OPTS);
   });
 
   it("does nothing while delivering if no home room is assigned", () => {

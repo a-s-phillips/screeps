@@ -18,6 +18,11 @@ declare global {
     sourceId?: Id<Source>;
     homeRoom?: string;
     remoteRoom?: string;
+    // Set on retreat from a Source Keeper room, cleared once it expires - prevents
+    // immediately turning back around next tick (see keeperHarvester.ts), which
+    // otherwise thrashes the creep back and forth across the room border for its whole
+    // remaining life without ever getting a real chance to wait out an unsafe window.
+    keeperRetreatUntil?: number;
   }
 
   interface RemoteIntel {
@@ -25,6 +30,16 @@ declare global {
     ownedByOther: boolean;
     reservedByOther: boolean;
     hasSourceKeeper: boolean;
+  }
+
+  interface KeeperIntel {
+    // Absolute Game.time a currently-open safe window closes at (a live guard is due to
+    // respawn), or null if every lair currently has a live guard with no visible
+    // countdown at all. Only ever written while the bot has vision into the room (see
+    // recordKeeperIntel in planning/keeperTargeting.ts) - stays frozen at its last
+    // observed value once vision is lost, same tradeoff recordRemoteIntel already makes.
+    nextWindowCloseTick: number | null;
+    observedAt: number;
   }
 
   interface RoomMemory {
@@ -39,6 +54,7 @@ declare global {
     // main.ts, since v1 keeperHarvester is self-hauling only and should never get a
     // container planned for it.
     keeperRoom?: string;
+    keeperIntel?: KeeperIntel;
   }
 }
 

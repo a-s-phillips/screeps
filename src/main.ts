@@ -4,6 +4,7 @@ import { checkLevelUp } from "./logging/levelUp";
 import { flushLogBuffer, log } from "./logging/logger";
 import { buildCpuSummary, buildTickSummary } from "./logging/tickSummary";
 import { cleanUpDeadCreepMemory } from "./memory/cleanup";
+import { recordKeeperIntel } from "./planning/keeperTargeting";
 import { recordRemoteIntel } from "./planning/remoteTargeting";
 import { planRoom } from "./planning/roomPlanner";
 import { run as runBuilder } from "./roles/builder";
@@ -86,6 +87,10 @@ export function loop(): void {
       // Overwritten every tick while visible, so it's ready the moment a remote-mining
       // candidate is scouted - recorded for every visible room, not just chosen targets.
       recordRemoteIntel(room, Memory.rooms[roomName]);
+      // Same "every visible room" treatment - a no-op for anything without a keeper
+      // lair, and lets decideKeeperSpawn's timing gate work off real data the moment a
+      // keeperHarvester (or anyone else) gets vision into the keeper room.
+      recordKeeperIntel(room, Memory.rooms[roomName]);
 
       const towers = getCachedFind(room, FIND_MY_STRUCTURES).filter(
         (structure): structure is StructureTower => structure.structureType === STRUCTURE_TOWER
