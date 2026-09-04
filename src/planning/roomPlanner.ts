@@ -3,6 +3,7 @@ import { chebyshevDistance, Point } from "../utils/grid";
 import { getCachedFind } from "../utils/roomCache";
 import { findContainerSite } from "./containerPlanner";
 import { findExtensionSite } from "./extensionPlanner";
+import { findLinkSite } from "./linkPlanner";
 import { planRoads } from "./roadPlanner";
 import { findStorageSite } from "./storagePlanner";
 import { findTowerSite } from "./towerPlanner";
@@ -277,6 +278,58 @@ export function planStorage(room: Room, essentialQueueEmpty: boolean): void {
   }
 }
 
+// Same low priority as storage (no defensive urgency, gated purely on the essential
+// queue being empty), but anchored controller-first rather than on spawn: the
+// controller-adjacent link is what actually closes the gap upgrader.ts's
+// findControllerContainer patched this session - even with a full controller
+// container, refilling it still costs a hauler trip. A link lets a source-side link
+// feed it instantly instead. Source anchors fill any remaining cap slots after the
+// controller's - useful, but strictly secondary to the one that removes hauler trips
+// from the upgrader's critical path.
+export function planLinks(room: Room, essentialQueueEmpty: boolean): void {
+  if (!room.controller) return;
+
+  const allowed = CONTROLLER_STRUCTURES[STRUCTURE_LINK][room.controller.level] ?? 0;
+
+  const existingLinks = getCachedFind(room, FIND_MY_STRUCTURES).filter(
+    (structure) => structure.structureType === STRUCTURE_LINK
+  );
+  const pendingLinkSites = getCachedFind(room, FIND_MY_CONSTRUCTION_SITES).filter(
+    (site) => site.structureType === STRUCTURE_LINK
+  );
+
+  if (existingLinks.length + pendingLinkSites.length >= allowed) return;
+
+  if (!essentialQueueEmpty) return;
+
+  const { isWalkable, isOccupied } = buildOccupancy(room);
+  const linkPositions: Point[] = [...existingLinks, ...pendingLinkSites].map((s) => s.pos);
+
+  const anchors: Point[] = [
+    { x: room.controller.pos.x, y: room.controller.pos.y },
+    ...getCachedFind(room, FIND_SOURCES).map((source) => ({ x: source.pos.x, y: source.pos.y }))
+  ];
+
+  for (const anchor of anchors) {
+    const hasNearbyLink = linkPositions.some((pos) => chebyshevDistance(pos, anchor) <= 1);
+    if (hasNearbyLink) continue;
+
+    const site = findLinkSite(isWalkable, isOccupied, anchor);
+    if (!site) continue;
+
+    const result = room.createConstructionSite(site.x, site.y, STRUCTURE_LINK);
+    if (result === OK) {
+      log("construction_site_planned", {
+        room: room.name,
+        x: site.x,
+        y: site.y,
+        structureType: STRUCTURE_LINK
+      });
+      return;
+    }
+  }
+}
+
 // Extensions/towers require ownership to build at all (and are already self-gated by
 // the RCL-0 CONTROLLER_STRUCTURES table for an unowned controller); roads aren't useful
 // without a colony to connect. Containers are the exception - allowed at RCL 0, and
@@ -301,4 +354,5 @@ export function planRoom(
   planTowers(room, hostileRecentlySeen, essentialQueueEmpty);
   planRamparts(room, hostileRecentlySeen, essentialQueueEmpty);
   planStorage(room, essentialQueueEmpty);
+  planLinks(room, essentialQueueEmpty);
 }

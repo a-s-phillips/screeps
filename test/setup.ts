@@ -61,6 +61,7 @@ Object.assign(globalThis, {
   STRUCTURE_WALL: "constructedWall",
   STRUCTURE_RAMPART: "rampart",
   STRUCTURE_STORAGE: "storage",
+  STRUCTURE_LINK: "link",
   STRUCTURE_KEEPER_LAIR: "keeperLair",
   TERRAIN_MASK_WALL: 1,
   TERRAIN_MASK_SWAMP: 2,
@@ -86,6 +87,7 @@ Object.assign(globalThis, {
     container: { 0: 5, 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 5, 8: 5 },
     tower: { 0: 0, 1: 0, 2: 0, 3: 1, 4: 1, 5: 2, 6: 2, 7: 3, 8: 6 },
     rampart: { 0: 0, 1: 0, 2: 2500, 3: 2500, 4: 2500, 5: 2500, 6: 2500, 7: 2500, 8: 2500 },
-    storage: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1 }
+    storage: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1 },
+    link: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 2, 6: 3, 7: 4, 8: 6 }
   }
 });

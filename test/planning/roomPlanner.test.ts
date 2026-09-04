@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   isLocalHostileRecentlySeen,
+  planLinks,
   planRamparts,
   planRoom,
   planStorage,
   planTowers
 } from "../../src/planning/roomPlanner";
 import { resetRoomCache } from "../../src/utils/roomCache";
+import { chebyshevDistance } from "../../src/utils/grid";
 import * as logger from "../../src/logging/logger";
 
 vi.mock("../../src/logging/logger", () => ({ log: vi.fn() }));
@@ -26,6 +28,8 @@ function mockRoom(opts: {
   pendingRampartSites?: { x: number; y: number }[];
   existingStorage?: { x: number; y: number }[];
   pendingStorageSites?: { x: number; y: number }[];
+  existingLinks?: { x: number; y: number }[];
+  pendingLinkSites?: { x: number; y: number }[];
   createResult?: ScreepsReturnCode;
   findPathResult?: { x: number; y: number }[];
   isMine?: boolean;
@@ -43,6 +47,8 @@ function mockRoom(opts: {
   const pendingRampartSites = opts.pendingRampartSites ?? [];
   const existingStorage = opts.existingStorage ?? [];
   const pendingStorageSites = opts.pendingStorageSites ?? [];
+  const existingLinks = opts.existingLinks ?? [];
+  const pendingLinkSites = opts.pendingLinkSites ?? [];
   const spawn = { pos: { x: 25, y: 25 } };
 
   const room = {
@@ -54,7 +60,8 @@ function mockRoom(opts: {
           ...existingExtensions.map((p) => ({ structureType: STRUCTURE_EXTENSION, pos: p })),
           ...existingTowers.map((p) => ({ structureType: STRUCTURE_TOWER, pos: p })),
           ...existingRamparts.map((p) => ({ structureType: STRUCTURE_RAMPART, pos: p })),
-          ...existingStorage.map((p) => ({ structureType: STRUCTURE_STORAGE, pos: p }))
+          ...existingStorage.map((p) => ({ structureType: STRUCTURE_STORAGE, pos: p })),
+          ...existingLinks.map((p) => ({ structureType: STRUCTURE_LINK, pos: p }))
         ];
       }
       if (type === FIND_STRUCTURES) {
@@ -70,7 +77,8 @@ function mockRoom(opts: {
           ...pendingRoadSites.map((p) => ({ structureType: STRUCTURE_ROAD, pos: p })),
           ...pendingTowerSites.map((p) => ({ structureType: STRUCTURE_TOWER, pos: p })),
           ...pendingRampartSites.map((p) => ({ structureType: STRUCTURE_RAMPART, pos: p })),
-          ...pendingStorageSites.map((p) => ({ structureType: STRUCTURE_STORAGE, pos: p }))
+          ...pendingStorageSites.map((p) => ({ structureType: STRUCTURE_STORAGE, pos: p })),
+          ...pendingLinkSites.map((p) => ({ structureType: STRUCTURE_LINK, pos: p }))
         ];
       }
       if (type === FIND_CONSTRUCTION_SITES) return [];
@@ -774,6 +782,174 @@ describe("planRoom", () => {
       const room = { name: "W1N1", controller: undefined, find: vi.fn() } as unknown as Room;
 
       planStorage(room, true);
+
+      expect((room as unknown as { find: ReturnType<typeof vi.fn> }).find).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("links", () => {
+    // Extension cap at RCL5 is 30 (test/setup.ts) - fill it so planExtensions reports done.
+    const extensionsAtCap = Array.from({ length: 30 }, (_, i) => ({
+      x: i % 25,
+      y: Math.floor(i / 25) + 1
+    }));
+
+    it("does nothing when already at the link cap for RCL", () => {
+      const room = mockRoom({
+        level: 5,
+        existingExtensions: extensionsAtCap,
+        existingLinks: [
+          { x: 41, y: 40 },
+          { x: 11, y: 10 }
+        ],
+        sources: [{ x: 10, y: 10 }]
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_LINK
+      );
+    });
+
+    it("does not place a link while extensions still need building", () => {
+      const room = mockRoom({ level: 5 });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_LINK
+      );
+    });
+
+    it("does not place a link while roads still need building", () => {
+      const room = mockRoom({ level: 5, existingExtensions: extensionsAtCap });
+
+      planRoom(room, { roadPlan: [{ x: 1, y: 1 }] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_LINK
+      );
+    });
+
+    it("anchors the first link on the controller once the essential queue is empty", () => {
+      const room = mockRoom({
+        level: 5,
+        existingExtensions: extensionsAtCap,
+        sources: [{ x: 10, y: 10 }]
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_LINK
+      );
+      const [x, y] = (room.createConstructionSite as ReturnType<typeof vi.fn>).mock.calls.find(
+        ([, , structureType]) => structureType === STRUCTURE_LINK
+      )!;
+      expect(chebyshevDistance({ x, y }, { x: 40, y: 40 })).toBe(1);
+      expect(logger.log).toHaveBeenCalledWith(
+        "construction_site_planned",
+        expect.objectContaining({ room: "W1N1", structureType: STRUCTURE_LINK })
+      );
+    });
+
+    it("anchors the next link on a source once the controller already has one nearby", () => {
+      const room = mockRoom({
+        level: 5,
+        existingExtensions: extensionsAtCap,
+        existingLinks: [{ x: 41, y: 40 }],
+        sources: [{ x: 10, y: 10 }]
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      const [x, y] = (room.createConstructionSite as ReturnType<typeof vi.fn>).mock.calls.find(
+        ([, , structureType]) => structureType === STRUCTURE_LINK
+      )!;
+      expect(chebyshevDistance({ x, y }, { x: 10, y: 10 })).toBe(1);
+    });
+
+    it("skips an anchor that already has a link nearby and places the next one at an uncovered anchor", () => {
+      // RCL8 cap is 6 (test/setup.ts) - well above the 2 existing links here, so this
+      // exercises the per-anchor hasNearbyLink skip rather than the cap gate above.
+      // Extension cap at RCL8 is 60, not the RCL5 fixture's 30 - fill separately so
+      // planExtensions reports done here too.
+      const extensionsAtRcl8Cap = Array.from({ length: 60 }, (_, i) => ({
+        x: i % 25,
+        y: Math.floor(i / 25) + 1
+      }));
+      const room = mockRoom({
+        level: 8,
+        existingExtensions: extensionsAtRcl8Cap,
+        existingLinks: [
+          { x: 41, y: 40 },
+          { x: 11, y: 10 }
+        ],
+        sources: [
+          { x: 10, y: 10 },
+          { x: 20, y: 20 }
+        ]
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      const [x, y] = (room.createConstructionSite as ReturnType<typeof vi.fn>).mock.calls.find(
+        ([, , structureType]) => structureType === STRUCTURE_LINK
+      )!;
+      expect(chebyshevDistance({ x, y }, { x: 20, y: 20 })).toBe(1);
+    });
+
+    it("places at most one link site per call, moving on to the next uncovered anchor next time", () => {
+      const room = mockRoom({
+        level: 5,
+        existingExtensions: extensionsAtCap,
+        sources: [
+          { x: 10, y: 10 },
+          { x: 20, y: 20 }
+        ]
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      const linkCalls = (
+        room.createConstructionSite as ReturnType<typeof vi.fn>
+      ).mock.calls.filter(([, , structureType]) => structureType === STRUCTURE_LINK);
+      expect(linkCalls).toHaveLength(1);
+    });
+
+    it("does not log when createConstructionSite fails", () => {
+      const room = mockRoom({
+        level: 5,
+        existingExtensions: extensionsAtCap,
+        createResult: ERR_NOT_ENOUGH_ENERGY
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(logger.log).not.toHaveBeenCalled();
+    });
+
+    it("does nothing below RCL5, where CONTROLLER_STRUCTURES.link is 0", () => {
+      const room = mockRoom({ level: 4 });
+
+      planLinks(room, true);
+
+      expect(room.createConstructionSite).not.toHaveBeenCalled();
+    });
+
+    it("does nothing for a room with no controller", () => {
+      const room = { name: "W1N1", controller: undefined, find: vi.fn() } as unknown as Room;
+
+      planLinks(room, true);
 
       expect((room as unknown as { find: ReturnType<typeof vi.fn> }).find).not.toHaveBeenCalled();
     });
