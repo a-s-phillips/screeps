@@ -4,6 +4,7 @@ import {
   decideNextRemoteSpawn,
   decideRemoteSpawn,
   decideScoutSpawn,
+  remoteHaulerTarget,
   RemoteRoomState
 } from "../../src/spawn/remoteSpawnManager";
 import { resetRoomCache } from "../../src/utils/roomCache";
@@ -266,6 +267,64 @@ function baseRemoteState(overrides: Partial<RemoteRoomState> = {}): RemoteRoomSt
   };
 }
 
+describe("remoteHaulerTarget", () => {
+  it("targets zero when no container has been built yet", () => {
+    const target = remoteHaulerTarget(baseRemoteState({ remoteContainerCount: 0 }), 170);
+
+    expect(target).toBe(0);
+  });
+
+  it("scales the target to the source's yield relative to a single hauler's round-trip throughput", () => {
+    // energyCapacityAvailable 1700 -> 17x[CARRY,MOVE] -> 850 cargo. At a 170-tick round
+    // trip that's exactly 5 energy/tick per hauler; one container's sustained yield
+    // (SOURCE_ENERGY_CAPACITY / ENERGY_REGEN_TIME = 10 energy/tick) needs exactly 2.
+    const target = remoteHaulerTarget(
+      baseRemoteState({ remoteContainerCount: 1, energyCapacityAvailable: 1700 }),
+      170
+    );
+
+    expect(target).toBe(2);
+  });
+
+  it("rounds up when the throughput ratio isn't a whole number", () => {
+    // energyCapacityAvailable 1000 -> 10x[CARRY,MOVE] -> 500 cargo -> 500/170 ≈ 2.94
+    // energy/tick per hauler; ceil(10 / 2.94) = 4, not 3 - a fraction of a hauler still
+    // means the source's yield isn't fully captured, so it rounds up rather than down.
+    const target = remoteHaulerTarget(
+      baseRemoteState({ remoteContainerCount: 1, energyCapacityAvailable: 1000 }),
+      170
+    );
+
+    expect(target).toBe(4);
+  });
+
+  it("scales desired throughput with multiple containers", () => {
+    const target = remoteHaulerTarget(
+      baseRemoteState({ remoteContainerCount: 2, energyCapacityAvailable: 1700 }),
+      170
+    );
+
+    expect(target).toBe(4);
+  });
+
+  it("returns zero when the room can't afford even one remoteHauler body", () => {
+    const target = remoteHaulerTarget(
+      baseRemoteState({ remoteContainerCount: 1, energyCapacityAvailable: 50 }),
+      170
+    );
+
+    expect(target).toBe(0);
+  });
+
+  it("defaults to the module's round-trip estimate when none is passed explicitly", () => {
+    const target = remoteHaulerTarget(
+      baseRemoteState({ remoteContainerCount: 1, energyCapacityAvailable: 1700 })
+    );
+
+    expect(target).toBeGreaterThan(0);
+  });
+});
+
 describe("decideNextRemoteSpawn", () => {
   it("spawns a reserver when there is none yet", () => {
     const decision = decideNextRemoteSpawn(baseRemoteState());
@@ -312,11 +371,14 @@ describe("decideNextRemoteSpawn", () => {
   });
 
   it("returns null once every target is met", () => {
+    // energyCapacityAvailable 1700 -> remoteHaulerTarget's own test above works out to
+    // exactly 2 for one container at the module's default round-trip estimate.
     const decision = decideNextRemoteSpawn(
       baseRemoteState({
         reserverCount: 1,
         remoteContainerCount: 1,
-        remoteHaulerCount: 1
+        remoteHaulerCount: 2,
+        energyCapacityAvailable: 1700
       })
     );
 

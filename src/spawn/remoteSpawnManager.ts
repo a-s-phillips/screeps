@@ -10,6 +10,42 @@ import { getCachedFind } from "../utils/roomCache";
 import { bodyCost, planBody, planMinerBody, planReserverBody, planScoutBody } from "./bodyPlanner";
 import { SpawnDecision } from "./spawnDecision";
 
+// Unverified guess pending a real measured round-trip time per remote room - same
+// tuning caveat as keeperTargeting.ts's KEEPER_ROOM_TRAVEL_ESTIMATE. Derived from one
+// live measurement (W57N24, a fatigue-weighted shortest path from spawn to the remote
+// container: ~58 tiles out at full speed empty, ~110 ticks back loaded and unroaded).
+export const REMOTE_HAULER_ROUND_TRIP_ESTIMATE = 170;
+
+// A source regenerates SOURCE_ENERGY_CAPACITY every ENERGY_REGEN_TIME ticks - the same
+// sustained-yield expression bodyPlanner.ts's SOURCE_SATURATION_WORK is built from.
+const SOURCE_YIELD_PER_TICK = SOURCE_ENERGY_CAPACITY / ENERGY_REGEN_TIME;
+
+// A flat 1-hauler-per-container target (the original design) assumed a single hauler's
+// round trip is short enough to keep up with a saturated source - not true once the trip
+// is more than a few dozen ticks each way. Found live: W57N24's one hauler was
+// delivering ~3.9 energy/tick against a fully-saturated 10-energy/tick source, so the
+// container sat permanently full with the surplus spilling and decaying on the ground.
+// Target is now sized to how many haulers it actually takes, at this room's current
+// affordable body, to match the source's sustained yield. roundTripEstimate is an
+// explicit parameter (defaulting to the module constant) rather than read directly, so
+// this stays unit-testable without depending on whatever the tuned value currently is -
+// same convention as roomPlanner.ts's planTowers/planRamparts overridePriority.
+export function remoteHaulerTarget(
+  state: RemoteRoomState,
+  roundTripEstimate = REMOTE_HAULER_ROUND_TRIP_ESTIMATE
+): number {
+  if (state.remoteContainerCount === 0) return 0;
+
+  const cargoCapacity =
+    planBody("remoteHauler", state.energyCapacityAvailable).filter((part) => part === CARRY)
+      .length * CARRY_CAPACITY;
+  if (cargoCapacity === 0) return 0;
+
+  const haulerThroughput = cargoCapacity / roundTripEstimate;
+  const desiredThroughput = state.remoteContainerCount * SOURCE_YIELD_PER_TICK;
+  return Math.ceil(desiredThroughput / haulerThroughput);
+}
+
 // One scout at a time is plenty - scouts are 50E and this naturally rate-limits against
 // local spawning, converging to "every candidate scouted" over a few spawn cycles.
 export function decideScoutSpawn(
@@ -159,7 +195,7 @@ export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | n
       count: state.remoteHarvesterCount,
       target: state.sourcesWithoutContainerCount
     },
-    { role: "remoteHauler", count: state.remoteHaulerCount, target: state.remoteContainerCount }
+    { role: "remoteHauler", count: state.remoteHaulerCount, target: remoteHaulerTarget(state) }
   ];
 
   for (const { role, count, target } of targets) {
