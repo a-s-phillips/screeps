@@ -12,18 +12,18 @@
 //
 // How it works: the actual write happens through the private server's admin
 // CLI, which the launcher's `screeps-launcher-cli.js` mod exposes as a plain
-// HTTP endpoint (POST /cli) on the CLI port. That port isn't published to the
-// host by docker-compose, so this script drops the generated JS payload into
-// pserver's bind-mounted data dir and runs curl *inside* the container via
-// `docker exec` to reach it over the container's own loopback.
-import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+// HTTP endpoint (POST /cli) on the CLI port - see pserverCli.mjs for how this
+// script (and ephemeralPserver.mjs) reach it.
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { runCliCommand } from "./pserverCli.mjs";
 
-const PSERVER_DATA_DIR = path.join(homedir(), "code/screeps/pserver/data");
-const PSERVER_CONTAINER = "screeps-pserver";
-const PAYLOAD_FILENAME = ".pserver-snapshot-import.js";
+// Overridable via env so ephemeralPserver.mjs can point this same, already-proven
+// scenario-seeding logic at a disposable instance instead of the persistent one -
+// unset, behavior is identical to before these existed.
+const PSERVER_DATA_DIR = process.env.PSERVER_DATA_DIR ?? path.join(homedir(), "code/screeps/pserver/data");
+const PSERVER_CONTAINER = process.env.PSERVER_CONTAINER ?? "screeps-pserver";
 
 const NPC_USER_IDS = new Set(["2", "3"]); // invaders, source keepers
 // Object fields that hold an *absolute* game tick on the source server and
@@ -64,6 +64,19 @@ function loadScreepsConfig() {
   return JSON.parse(readFileSync(new URL("../screeps.json", import.meta.url)));
 }
 
+// Same override pattern as PSERVER_DATA_DIR/PSERVER_CONTAINER above - lets
+// ephemeralPserver.mjs point this at a freshly-provisioned instance's own API
+// instead of the persistent server's screeps.json entry.
+function resolvePserverConfig() {
+  if (!process.env.PSERVER_HOST) return loadScreepsConfig().pserver;
+  return {
+    protocol: "http",
+    hostname: process.env.PSERVER_HOST,
+    port: Number(process.env.PSERVER_PORT ?? 21025),
+    token: process.env.PSERVER_TOKEN
+  };
+}
+
 async function fetchJson(url, headers) {
   const res = await fetch(url, { headers });
   const body = await res.json();
@@ -93,9 +106,8 @@ function translateTicks(obj, offset) {
 
 function main() {
   const { rooms, shard, overwrite } = parseArgs(process.argv.slice(2));
-  const config = loadScreepsConfig();
-  const official = config.main;
-  const pserver = config.pserver;
+  const official = loadScreepsConfig().main;
+  const pserver = resolvePserverConfig();
 
   const officialBase = `${official.protocol}://${official.hostname}${
     official.port && official.port !== 443 ? ":" + official.port : ""
@@ -193,32 +205,11 @@ async function run(
     overwrite,
     pserverUserId
   });
-  const payloadPath = path.join(PSERVER_DATA_DIR, PAYLOAD_FILENAME);
-  writeFileSync(payloadPath, payload);
 
   console.log(
     `Importing into pserver (${objectDocs.length} objects across ${rooms.length} room(s))...`
   );
-  try {
-    const result = execFileSync(
-      "docker",
-      [
-        "exec",
-        PSERVER_CONTAINER,
-        "curl",
-        "-sS",
-        "-X",
-        "POST",
-        "http://localhost:21026/cli",
-        "--data-binary",
-        `@/screeps/${PAYLOAD_FILENAME}`
-      ],
-      { encoding: "utf8" }
-    );
-    console.log(result.trim());
-  } finally {
-    unlinkSync(payloadPath);
-  }
+  console.log(runCliCommand(PSERVER_CONTAINER, PSERVER_DATA_DIR, payload));
 }
 
 function buildCliPayload({ rooms, roomsDocs, terrainDocs, objectDocs, overwrite, pserverUserId }) {
