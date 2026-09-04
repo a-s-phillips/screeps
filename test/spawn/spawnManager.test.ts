@@ -389,6 +389,26 @@ describe("decideNextSpawn", () => {
       // Falls through to the normal priority order once the defender need is met.
       expect(decision?.role).toBe("harvester");
     });
+
+    it("sizes the defender body down to fit available energy instead of waiting for full capacity", () => {
+      // Found live on pserver: a mature room (high energyCapacityAvailable) recovering
+      // its energy pool never actually spawned a defender against a real, live hostile -
+      // planBody("defender", energyCapacityAvailable) always demanded a full-capacity
+      // body (e.g. 1690 energy for a 1800-capacity room), which normal economy spawns
+      // kept outcompeting for every tick energyAvailable was too low to afford it. Every
+      // other role already downsizes when starved (see feederSizingCapacity/
+      // bootstrapSizingCapacity) - the defender path never did.
+      const state = baseState({
+        hostileCreepCount: 1,
+        energyAvailable: 200,
+        energyCapacityAvailable: 1800
+      });
+
+      const decision = decideNextSpawn(state);
+
+      expect(decision?.role).toBe("defender");
+      expect(decision?.body).toEqual([ATTACK, MOVE]);
+    });
   });
 
   describe("defender - sticky recent sighting (tier 2)", () => {

@@ -86,13 +86,22 @@ export function hasUnmetLocalNeed(state: RoomState): boolean {
 // before everything else, including the miner bootstrap check. Capped at the live
 // hostile count (not spawned past what's actually there) so a lone Invader doesn't
 // trigger a full DEFENDER_TARGET_CAP-sized garrison.
+//
+// Sized down to whatever's actually available, same as every economy role's own
+// downsize escape hatch (feederSizingCapacity/bootstrapSizingCapacity) - found live: a
+// mature, high-capacity room recovering its energy pool never spawned a defender
+// against a real, standing hostile, because planBody("defender", energyCapacityAvailable)
+// always demanded a full-capacity body (e.g. 1690 energy in an 1800-capacity room) that
+// normal economy spawns kept outcompeting for on every tick energyAvailable was too low
+// to afford it. A same-tick ATTACK+MOVE pair against a lone Invader beats waiting
+// indefinitely for a body sized for a threat that was never actually that large.
 function decideActiveThreatDefender(state: RoomState): SpawnDecision | null {
   if (state.hostileCreepCount === 0) return null;
 
   const target = Math.min(state.hostileCreepCount, DEFENDER_TARGET_CAP);
   if (state.creepCounts.defender >= target) return null;
 
-  const body = planBody("defender", state.energyCapacityAvailable);
+  const body = planBody("defender", Math.min(state.energyCapacityAvailable, state.energyAvailable));
   if (body.length === 0 || bodyCost(body) > state.energyAvailable) return null;
 
   return { role: "defender", body };
@@ -103,10 +112,14 @@ function decideActiveThreatDefender(state: RoomState): SpawnDecision | null {
 // after every other role's target is already met. Keeps exactly one defender around
 // for a while after a sighting ages, in case the same threat comes back, without ever
 // competing with an actual economy deficit for the same spawn slot.
+//
+// Same downsizing as decideActiveThreatDefender, for the same reason - waiting for a
+// full-capacity body here can stall just as easily once every other role's need is met
+// but energyAvailable hasn't caught up to energyCapacityAvailable yet.
 function decideStickyDefender(state: RoomState): SpawnDecision | null {
   if (!state.hostileRecentlySeen || state.creepCounts.defender >= 1) return null;
 
-  const body = planBody("defender", state.energyCapacityAvailable);
+  const body = planBody("defender", Math.min(state.energyCapacityAvailable, state.energyAvailable));
   if (body.length === 0 || bodyCost(body) > state.energyAvailable) return null;
 
   return { role: "defender", body };
