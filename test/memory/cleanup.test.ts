@@ -23,16 +23,36 @@ describe("cleanUpDeadCreepMemory", () => {
     expect(memory.creeps).toEqual({ alive: {} });
   });
 
-  it("logs a creep_died event with the creep's role for each departed creep", () => {
+  it("logs a creep_died event with the creep's role and home room for each departed creep", () => {
     vi.mocked(logger.log).mockClear();
     const memory = {
-      creeps: { dead: { role: "harvester", working: false } }
+      creeps: { dead: { role: "harvester", working: false, homeRoom: "W57N25" } }
     } as unknown as Memory;
     const creeps = {} as unknown as { [name: string]: Creep };
 
     cleanUpDeadCreepMemory(memory, creeps);
 
-    expect(logger.log).toHaveBeenCalledWith("creep_died", { role: "harvester", name: "dead" });
+    expect(logger.log).toHaveBeenCalledWith("creep_died", {
+      role: "harvester",
+      name: "dead",
+      room: "W57N25"
+    });
+  });
+
+  it("logs a creep_died event with room undefined when the creep's memory never recorded a home room", () => {
+    vi.mocked(logger.log).mockClear();
+    const memory = {
+      creeps: { dead: { role: "scout", working: false } }
+    } as unknown as Memory;
+    const creeps = {} as unknown as { [name: string]: Creep };
+
+    cleanUpDeadCreepMemory(memory, creeps);
+
+    expect(logger.log).toHaveBeenCalledWith("creep_died", {
+      role: "scout",
+      name: "dead",
+      room: undefined
+    });
   });
 
   it("does not log anything when no creeps died", () => {
