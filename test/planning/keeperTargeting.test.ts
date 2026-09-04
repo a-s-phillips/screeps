@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   isKeeperWindowReachable,
+  KEEPER_INTEL_STALE_AFTER,
   KEEPER_RETREAT_LEAD_TICKS,
   recordKeeperIntel
 } from "../../src/planning/keeperTargeting";
@@ -100,5 +101,29 @@ describe("isKeeperWindowReachable", () => {
         50
       )
     ).toBe(false);
+  });
+
+  it("is true (blind re-scout) once intel is older than the staleness threshold, even though the last observation showed no reachable window", () => {
+    // Without this, a room that's fully guarded on last observation - and never regains
+    // vision, because nothing spawns to re-observe it - stays permanently unreachable:
+    // isKeeperWindowReachable keeps returning false forever, so no keeperHarvester ever
+    // goes back to refresh recordKeeperIntel. Found live: W56N25's intel sat 23,000+
+    // ticks stale (many full guard/open cycles) with the colony never noticing the room
+    // had opened again in the meantime.
+    const intel: KeeperIntel = {
+      nextWindowCloseTick: null,
+      observedAt: 1000 - KEEPER_INTEL_STALE_AFTER - 1
+    };
+
+    expect(isKeeperWindowReachable(intel, 1000, 50)).toBe(true);
+  });
+
+  it("still trusts a closed-window observation exactly at the staleness threshold", () => {
+    const intel: KeeperIntel = {
+      nextWindowCloseTick: null,
+      observedAt: 1000 - KEEPER_INTEL_STALE_AFTER
+    };
+
+    expect(isKeeperWindowReachable(intel, 1000, 50)).toBe(false);
   });
 });
