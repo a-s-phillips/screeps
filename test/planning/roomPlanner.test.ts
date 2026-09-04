@@ -3,6 +3,7 @@ import {
   isLocalHostileRecentlySeen,
   planRamparts,
   planRoom,
+  planStorage,
   planTowers
 } from "../../src/planning/roomPlanner";
 import { resetRoomCache } from "../../src/utils/roomCache";
@@ -23,6 +24,8 @@ function mockRoom(opts: {
   pendingTowerSites?: { x: number; y: number }[];
   existingRamparts?: { x: number; y: number }[];
   pendingRampartSites?: { x: number; y: number }[];
+  existingStorage?: { x: number; y: number }[];
+  pendingStorageSites?: { x: number; y: number }[];
   createResult?: ScreepsReturnCode;
   findPathResult?: { x: number; y: number }[];
   isMine?: boolean;
@@ -38,6 +41,8 @@ function mockRoom(opts: {
   const pendingTowerSites = opts.pendingTowerSites ?? [];
   const existingRamparts = opts.existingRamparts ?? [];
   const pendingRampartSites = opts.pendingRampartSites ?? [];
+  const existingStorage = opts.existingStorage ?? [];
+  const pendingStorageSites = opts.pendingStorageSites ?? [];
   const spawn = { pos: { x: 25, y: 25 } };
 
   const room = {
@@ -48,7 +53,8 @@ function mockRoom(opts: {
         return [
           ...existingExtensions.map((p) => ({ structureType: STRUCTURE_EXTENSION, pos: p })),
           ...existingTowers.map((p) => ({ structureType: STRUCTURE_TOWER, pos: p })),
-          ...existingRamparts.map((p) => ({ structureType: STRUCTURE_RAMPART, pos: p }))
+          ...existingRamparts.map((p) => ({ structureType: STRUCTURE_RAMPART, pos: p })),
+          ...existingStorage.map((p) => ({ structureType: STRUCTURE_STORAGE, pos: p }))
         ];
       }
       if (type === FIND_STRUCTURES) {
@@ -63,7 +69,8 @@ function mockRoom(opts: {
           ...pendingContainerSites.map((p) => ({ structureType: STRUCTURE_CONTAINER, pos: p })),
           ...pendingRoadSites.map((p) => ({ structureType: STRUCTURE_ROAD, pos: p })),
           ...pendingTowerSites.map((p) => ({ structureType: STRUCTURE_TOWER, pos: p })),
-          ...pendingRampartSites.map((p) => ({ structureType: STRUCTURE_RAMPART, pos: p }))
+          ...pendingRampartSites.map((p) => ({ structureType: STRUCTURE_RAMPART, pos: p })),
+          ...pendingStorageSites.map((p) => ({ structureType: STRUCTURE_STORAGE, pos: p }))
         ];
       }
       if (type === FIND_CONSTRUCTION_SITES) return [];
@@ -664,6 +671,111 @@ describe("planRoom", () => {
       planRamparts(room, false, false, true);
 
       expect(room.createConstructionSite).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("storage", () => {
+    // Extension cap at RCL4 is 20 (test/setup.ts) - fill it so planExtensions reports done.
+    const extensionsAtCap = Array.from({ length: 20 }, (_, i) => ({ x: i % 25, y: Math.floor(i / 25) + 1 }));
+
+    it("does nothing when already at the storage cap for RCL", () => {
+      const room = mockRoom({
+        level: 4,
+        existingExtensions: extensionsAtCap,
+        existingStorage: [{ x: 30, y: 30 }]
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_STORAGE
+      );
+    });
+
+    it("does not place storage while extensions still need building", () => {
+      const room = mockRoom({ level: 4 });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_STORAGE
+      );
+    });
+
+    it("does not place storage while roads still need building", () => {
+      const room = mockRoom({ level: 4, existingExtensions: extensionsAtCap });
+
+      planRoom(room, { roadPlan: [{ x: 1, y: 1 }] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_STORAGE
+      );
+    });
+
+    it("places storage once both the extension and road queues are empty", () => {
+      const room = mockRoom({ level: 4, existingExtensions: extensionsAtCap });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_STORAGE
+      );
+      expect(logger.log).toHaveBeenCalledWith(
+        "construction_site_planned",
+        expect.objectContaining({ room: "W1N1", structureType: STRUCTURE_STORAGE })
+      );
+    });
+
+    it("does not log when createConstructionSite fails", () => {
+      const room = mockRoom({
+        level: 4,
+        existingExtensions: extensionsAtCap,
+        createResult: ERR_NOT_ENOUGH_ENERGY
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(logger.log).not.toHaveBeenCalled();
+    });
+
+    it("does nothing when there is no spawn to anchor on", () => {
+      const room = mockRoom({ level: 4, existingExtensions: extensionsAtCap });
+      (room.find as ReturnType<typeof vi.fn>).mockImplementation((type: FindConstant) => {
+        if (type === FIND_MY_SPAWNS) return [];
+        return [];
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_STORAGE
+      );
+    });
+
+    it("does nothing below RCL4, where CONTROLLER_STRUCTURES.storage is 0", () => {
+      const room = mockRoom({ level: 3 });
+
+      planStorage(room, true);
+
+      expect(room.createConstructionSite).not.toHaveBeenCalled();
+    });
+
+    it("does nothing for a room with no controller", () => {
+      const room = { name: "W1N1", controller: undefined, find: vi.fn() } as unknown as Room;
+
+      planStorage(room, true);
+
+      expect((room as unknown as { find: ReturnType<typeof vi.fn> }).find).not.toHaveBeenCalled();
     });
   });
 

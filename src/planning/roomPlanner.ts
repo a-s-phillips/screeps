@@ -4,6 +4,7 @@ import { getCachedFind } from "../utils/roomCache";
 import { findContainerSite } from "./containerPlanner";
 import { findExtensionSite } from "./extensionPlanner";
 import { planRoads } from "./roadPlanner";
+import { findStorageSite } from "./storagePlanner";
 import { findTowerSite } from "./towerPlanner";
 
 // Ticks a hostile sighting keeps the tower/rampart-priority gate open after last seen - tune freely.
@@ -238,6 +239,44 @@ export function planRamparts(
   }
 }
 
+// Storage has no defensive urgency the way towers/ramparts do (no hostile-seen
+// override), so it's gated purely on the essential queue (extensions, roads) being
+// empty - it's the lowest-priority construction, built once everything ahead of it
+// is done.
+export function planStorage(room: Room, essentialQueueEmpty: boolean): void {
+  if (!room.controller) return;
+
+  const allowed = CONTROLLER_STRUCTURES[STRUCTURE_STORAGE][room.controller.level] ?? 0;
+
+  const existingStorage = getCachedFind(room, FIND_MY_STRUCTURES).filter(
+    (structure) => structure.structureType === STRUCTURE_STORAGE
+  ).length;
+  const pendingStorageSites = getCachedFind(room, FIND_MY_CONSTRUCTION_SITES).filter(
+    (site) => site.structureType === STRUCTURE_STORAGE
+  ).length;
+
+  if (existingStorage + pendingStorageSites >= allowed) return;
+
+  if (!essentialQueueEmpty) return;
+
+  const spawn = getCachedFind(room, FIND_MY_SPAWNS)[0];
+  if (!spawn) return;
+
+  const { isWalkable, isOccupied } = buildOccupancy(room);
+  const site = findStorageSite(isWalkable, isOccupied, { x: spawn.pos.x, y: spawn.pos.y });
+  if (!site) return;
+
+  const result = room.createConstructionSite(site.x, site.y, STRUCTURE_STORAGE);
+  if (result === OK) {
+    log("construction_site_planned", {
+      room: room.name,
+      x: site.x,
+      y: site.y,
+      structureType: STRUCTURE_STORAGE
+    });
+  }
+}
+
 // Extensions/towers require ownership to build at all (and are already self-gated by
 // the RCL-0 CONTROLLER_STRUCTURES table for an unowned controller); roads aren't useful
 // without a colony to connect. Containers are the exception - allowed at RCL 0, and
@@ -261,4 +300,5 @@ export function planRoom(
   const essentialQueueEmpty = extensionsDone && roadsDone;
   planTowers(room, hostileRecentlySeen, essentialQueueEmpty);
   planRamparts(room, hostileRecentlySeen, essentialQueueEmpty);
+  planStorage(room, essentialQueueEmpty);
 }
