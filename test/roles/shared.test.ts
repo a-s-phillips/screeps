@@ -5,6 +5,7 @@ import {
   deliverEnergy,
   findAdjacentContainerWithCapacity,
   findContainerAtSource,
+  findControllerContainer,
   gatherEnergy,
   harvestFromNearestSource,
   MOVE_OPTS,
@@ -208,22 +209,39 @@ describe("harvestFromNearestSource", () => {
 function mockDeliveryCreep(
   overrides: {
     structures?: { id: string; structureType: StructureConstant; freeCapacity: number }[];
+    containers?: { id: string; pos: { x: number; y: number }; freeCapacity: number }[];
+    controller?: { pos: { x: number; y: number }; my: boolean };
     transferResult?: ScreepsReturnCode;
   } = {}
 ) {
   const structures = overrides.structures ?? [
     { id: "spawn1", structureType: STRUCTURE_SPAWN, freeCapacity: 100 }
   ];
-  const targets = structures.map((s) => ({
+  const myTargets = structures.map((s) => ({
     id: s.id,
     structureType: s.structureType,
     store: { getFreeCapacity: () => s.freeCapacity }
   }));
 
+  const containers = overrides.containers ?? [];
+  const containerTargets = containers.map((c) => ({
+    id: c.id,
+    structureType: STRUCTURE_CONTAINER,
+    pos: c.pos,
+    store: { getFreeCapacity: () => c.freeCapacity }
+  }));
+
+  const controller = overrides.controller ?? { pos: { x: 25, y: 25 }, my: true };
+
   return {
     room: {
       name: "W1N1",
-      find: vi.fn().mockReturnValue(targets)
+      controller,
+      find: vi.fn((type: FindConstant) => {
+        if (type === FIND_MY_STRUCTURES) return myTargets;
+        if (type === FIND_STRUCTURES) return containerTargets;
+        return [];
+      })
     },
     pos: {
       findClosestByPath: vi.fn((candidates: unknown[]) => candidates[0] ?? null)
@@ -326,6 +344,113 @@ describe("deliverEnergy", () => {
 
     expect(acted).toBe(false);
     expect(creep.transfer).not.toHaveBeenCalled();
+  });
+
+  // Regression coverage for the upgrader-starvation fix: the controller container used
+  // to be filled only as a hauler's last resort, after every spawn/extension/tower was
+  // already full - which almost never happened in practice, so it sat empty and
+  // upgraders self-hauled all the way to a source container instead. It's now just
+  // another member of the same closest-need-wins pool.
+  it("delivers to the controller-adjacent container when nothing else needs energy", () => {
+    const creep = mockDeliveryCreep({
+      structures: [{ id: "spawn1", structureType: STRUCTURE_SPAWN, freeCapacity: 0 }],
+      containers: [{ id: "controllerContainer1", pos: { x: 25, y: 25 }, freeCapacity: 50 }],
+      controller: { pos: { x: 25, y: 25 }, my: true }
+    });
+
+    const acted = deliverEnergy(creep);
+
+    expect(acted).toBe(true);
+    expect(creep.transfer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "controllerContainer1" }),
+      RESOURCE_ENERGY
+    );
+  });
+
+  it("ignores a container that isn't adjacent to the controller", () => {
+    const creep = mockDeliveryCreep({
+      structures: [{ id: "spawn1", structureType: STRUCTURE_SPAWN, freeCapacity: 0 }],
+      containers: [{ id: "sourceContainer1", pos: { x: 10, y: 10 }, freeCapacity: 50 }],
+      controller: { pos: { x: 25, y: 25 }, my: true }
+    });
+
+    const acted = deliverEnergy(creep);
+
+    expect(acted).toBe(false);
+    expect(creep.transfer).not.toHaveBeenCalled();
+  });
+
+  it("excludes the controller container when it has no free capacity", () => {
+    const creep = mockDeliveryCreep({
+      structures: [{ id: "spawn1", structureType: STRUCTURE_SPAWN, freeCapacity: 0 }],
+      containers: [{ id: "controllerContainer1", pos: { x: 25, y: 25 }, freeCapacity: 0 }],
+      controller: { pos: { x: 25, y: 25 }, my: true }
+    });
+
+    const acted = deliverEnergy(creep);
+
+    expect(acted).toBe(false);
+    expect(creep.transfer).not.toHaveBeenCalled();
+  });
+
+  it("ignores the controller container in a room we don't own", () => {
+    const creep = mockDeliveryCreep({
+      structures: [{ id: "spawn1", structureType: STRUCTURE_SPAWN, freeCapacity: 0 }],
+      containers: [{ id: "controllerContainer1", pos: { x: 25, y: 25 }, freeCapacity: 50 }],
+      controller: { pos: { x: 25, y: 25 }, my: false }
+    });
+
+    const acted = deliverEnergy(creep);
+
+    expect(acted).toBe(false);
+    expect(creep.transfer).not.toHaveBeenCalled();
+  });
+});
+
+function mockControllerRoom(
+  controller: { pos: { x: number; y: number }; my: boolean } | undefined,
+  containers: { id: string; pos: { x: number; y: number } }[]
+): Room {
+  return {
+    name: "W1N1",
+    controller,
+    find: vi
+      .fn()
+      .mockReturnValue(
+        containers.map((c) => ({ id: c.id, structureType: STRUCTURE_CONTAINER, pos: c.pos }))
+      )
+  } as unknown as Room;
+}
+
+describe("findControllerContainer", () => {
+  it("returns the container within range 1 of the controller", () => {
+    const room = mockControllerRoom({ pos: { x: 25, y: 25 }, my: true }, [
+      { id: "c1", pos: { x: 26, y: 25 } }
+    ]);
+
+    expect(findControllerContainer(room)).toEqual(expect.objectContaining({ id: "c1" }));
+  });
+
+  it("returns undefined when no container is within range 1 of the controller", () => {
+    const room = mockControllerRoom({ pos: { x: 25, y: 25 }, my: true }, [
+      { id: "c1", pos: { x: 30, y: 25 } }
+    ]);
+
+    expect(findControllerContainer(room)).toBeUndefined();
+  });
+
+  it("returns undefined when the room has no controller", () => {
+    const room = mockControllerRoom(undefined, [{ id: "c1", pos: { x: 25, y: 25 } }]);
+
+    expect(findControllerContainer(room)).toBeUndefined();
+  });
+
+  it("returns undefined when the controller isn't ours", () => {
+    const room = mockControllerRoom({ pos: { x: 25, y: 25 }, my: false }, [
+      { id: "c1", pos: { x: 25, y: 25 } }
+    ]);
+
+    expect(findControllerContainer(room)).toBeUndefined();
   });
 });
 

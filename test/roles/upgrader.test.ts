@@ -7,7 +7,11 @@ import { resetRoomCache } from "../../src/utils/roomCache";
 // closer than a container", so existing tests still exercise the withdraw/harvest
 // fallback path unless a test deliberately overrides positions.
 const source = { id: "source1", pos: { x: 20, y: 20 } };
-const controller = { id: "controller1" };
+// Far from every other test's container positions (all near {0,0}-{10,0}) so
+// findControllerContainer only ever matches a container deliberately placed adjacent to
+// it - existing scenarios keep exercising gatherEnergy's own source-vs-container logic
+// unchanged.
+const controller = { id: "controller1", pos: { x: 25, y: 25 }, my: true };
 
 function mockCreep(opts: {
   working: boolean;
@@ -143,5 +147,47 @@ describe("upgrader role", () => {
       RESOURCE_ENERGY
     );
     expect(creep.harvest).not.toHaveBeenCalled();
+  });
+
+  // Regression coverage for the upgrader-starvation fix: gatherEnergy's "nearest source
+  // vs. globally fullest container" comparison ignores proximity to the creep's own
+  // local container, so a stationary upgrader could walk right past its own
+  // partially-full controller container to a fuller one elsewhere in the room.
+  it("withdraws from its own controller-adjacent container even when a farther container has more energy", () => {
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 0,
+      freeCapacity: 50,
+      containers: [
+        { id: "controllerContainer1", usedCapacity: 50, pos: { x: 26, y: 25 } },
+        { id: "fullerContainer1", usedCapacity: 500, pos: { x: 1, y: 0 } }
+      ]
+    });
+
+    run(creep);
+
+    expect(creep.withdraw).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "controllerContainer1" }),
+      RESOURCE_ENERGY
+    );
+  });
+
+  it("falls back to the general gather logic once its own controller container is empty", () => {
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 0,
+      freeCapacity: 50,
+      containers: [
+        { id: "controllerContainer1", usedCapacity: 0, pos: { x: 26, y: 25 } },
+        { id: "otherContainer1", usedCapacity: 50, pos: { x: 1, y: 0 } }
+      ]
+    });
+
+    run(creep);
+
+    expect(creep.withdraw).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "otherContainer1" }),
+      RESOURCE_ENERGY
+    );
   });
 });

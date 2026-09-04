@@ -63,19 +63,51 @@ export function harvestFromNearestSource(creep: Creep): void {
   }
 }
 
-// Spawn, extensions, and towers are treated as one pool rather than spawn/extension-first:
-// a strict priority tier left towers permanently starved in practice, because extensions
-// rarely sit at 100% full in an active colony (creeps constantly draw them down on spawn),
-// so the tower's "leftovers" tier almost never triggered. Closest-need-wins still keeps
-// spawning covered in the common case, since extensions cluster near the spawn.
+// The container built next to our own controller (see roomPlanner.ts's planContainers) -
+// a delivery target for haulers/deliverers, never a pickup source (see
+// withdrawFromFullestContainer's exclusion). Guarded on room.controller.my so a creep
+// delivering in some other room (shouldn't happen given every caller only delivers once
+// home, but kept defensive per the tick-boundary convention) never mistakes an unowned
+// controller's container for ours.
+export function findControllerContainer(room: Room): StructureContainer | undefined {
+  if (!room.controller?.my) return undefined;
+  const controllerPos = room.controller.pos;
+
+  return getCachedFind(room, FIND_STRUCTURES).find(
+    (structure): structure is StructureContainer =>
+      structure.structureType === STRUCTURE_CONTAINER &&
+      chebyshevDistance(structure.pos, controllerPos) <= 1
+  );
+}
+
+// Spawn, extensions, towers, and the controller container are treated as one pool
+// rather than a strict priority chain: a strict spawn/extension-first tier left towers
+// permanently starved in practice, because extensions rarely sit at 100% full in an
+// active colony (creeps constantly draw them down on spawn), so the tower's "leftovers"
+// tier almost never triggered. The controller container had the exact same problem one
+// level further down the (former) chain - found live: haulers only ever topped it off
+// once every other target was already full, which almost never happened, so it sat
+// empty and upgraders had to self-haul all the way to a source container instead,
+// tanking upgrade throughput well below what the room's WORK parts should produce.
+// Closest-need-wins still keeps spawning covered in the common case, since extensions
+// cluster near the spawn.
 export function deliverEnergy(creep: Creep): boolean {
-  const targets = getCachedFind(creep.room, FIND_MY_STRUCTURES).filter(
+  const myTargets = getCachedFind(creep.room, FIND_MY_STRUCTURES).filter(
     (structure): structure is StructureSpawn | StructureExtension | StructureTower =>
       (structure.structureType === STRUCTURE_SPAWN ||
         structure.structureType === STRUCTURE_EXTENSION ||
         structure.structureType === STRUCTURE_TOWER) &&
       structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0
   );
+
+  const controllerContainer = findControllerContainer(creep.room);
+  const targets: (StructureSpawn | StructureExtension | StructureTower | StructureContainer)[] = [
+    ...myTargets
+  ];
+  if (controllerContainer && controllerContainer.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+    targets.push(controllerContainer);
+  }
+
   const target = creep.pos.findClosestByPath(targets);
   if (!target) return false;
 

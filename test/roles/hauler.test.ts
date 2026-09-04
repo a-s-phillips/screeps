@@ -10,7 +10,7 @@ const controllerContainer = {
   pos: { x: 41, y: 40 }
 };
 const spawn = { id: "spawn1", structureType: STRUCTURE_SPAWN };
-const controller = { id: "controller1", pos: { x: 40, y: 40 } };
+const controller = { id: "controller1", pos: { x: 40, y: 40 }, my: true };
 
 function mockCreep(opts: {
   working: boolean;
