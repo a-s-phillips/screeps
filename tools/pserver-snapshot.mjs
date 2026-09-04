@@ -185,7 +185,14 @@ async function run(
     }
   }
 
-  const payload = buildCliPayload({ rooms, roomsDocs, terrainDocs, objectDocs, overwrite });
+  const payload = buildCliPayload({
+    rooms,
+    roomsDocs,
+    terrainDocs,
+    objectDocs,
+    overwrite,
+    pserverUserId
+  });
   const payloadPath = path.join(PSERVER_DATA_DIR, PAYLOAD_FILENAME);
   writeFileSync(payloadPath, payload);
 
@@ -214,7 +221,7 @@ async function run(
   }
 }
 
-function buildCliPayload({ rooms, roomsDocs, terrainDocs, objectDocs, overwrite }) {
+function buildCliPayload({ rooms, roomsDocs, terrainDocs, objectDocs, overwrite, pserverUserId }) {
   // This string is executed inside the pserver process's CLI sandbox (see
   // node_modules/@screeps/backend/lib/cli/sandbox.js) - `storage` and `map`
   // are provided by that sandbox, not by this script.
@@ -226,6 +233,7 @@ function buildCliPayload({ rooms, roomsDocs, terrainDocs, objectDocs, overwrite 
   var roomsDocs = ${JSON.stringify(roomsDocs)};
   var terrainDocs = ${JSON.stringify(terrainDocs)};
   var objectDocs = ${JSON.stringify(objectDocs)};
+  var pserverUserId = ${JSON.stringify(pserverUserId)};
 
   return db.rooms.find({ _id: { $in: rooms } }).then(function(existing) {
     if (existing.length > 0 && !overwrite) {
@@ -239,6 +247,35 @@ function buildCliPayload({ rooms, roomsDocs, terrainDocs, objectDocs, overwrite 
           db['rooms.objects'].removeWhere({ room: { $in: rooms } }),
           db['rooms.terrain'].removeWhere({ room: { $in: rooms } }),
         ]);
+      })
+      // Game.spawns is name-keyed, not id-keyed - a cloned spawn that keeps its
+      // original name collides with any other spawn the same pserver account
+      // already owns elsewhere (real Screeps prevents this at spawn-creation time;
+      // a raw DB insert bypasses that check entirely). Found live: W57N25 and W9N8
+      // both ended up with a spawn named "Spawn1" under the same account, and
+      // Game.spawns could only ever expose one of them - the other's room silently
+      // never spawned again, with no error anywhere, until the collision was found
+      // and one spawn renamed by hand. Renaming on import, before anything is ever
+      // inserted, closes the gap instead of relying on catching it after the fact.
+      .then(function() {
+        if (!pserverUserId) return;
+        return db['rooms.objects'].find({ type: 'spawn', user: pserverUserId }).then(function(existingSpawns) {
+          var usedNames = {};
+          existingSpawns.forEach(function(s) { usedNames[s.name] = true; });
+          objectDocs.forEach(function(obj) {
+            if (obj.type !== 'spawn' || obj.user !== pserverUserId) return;
+            if (!usedNames[obj.name]) {
+              usedNames[obj.name] = true;
+              return;
+            }
+            var renamed = obj.name + '_' + obj.room;
+            while (usedNames[renamed]) {
+              renamed = obj.name + '_' + obj.room + '_' + Math.floor(Math.random() * 10000);
+            }
+            obj.name = renamed;
+            usedNames[renamed] = true;
+          });
+        });
       })
       .then(function() {
         return Promise.all([
