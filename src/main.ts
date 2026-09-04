@@ -1,4 +1,5 @@
 import { runWithErrorLogging } from "./logging/errorHandler";
+import { detectHostileKills } from "./logging/hostileKills";
 import { detectNewHostiles, recordHostileSighting } from "./logging/hostiles";
 import { checkLevelUp } from "./logging/levelUp";
 import { flushLogBuffer, log } from "./logging/logger";
@@ -37,6 +38,7 @@ const roleRunners: Record<CreepRole, (creep: Creep) => void> = {
 };
 
 let seenHostileIds = new Set<string>();
+let seenHostileTombstoneIds = new Set<string>();
 
 // Extracted from loop() for testability - flattens every owned room's remoteRooms list
 // into one set, since a room can now be *some* home room's remote target without being
@@ -77,6 +79,16 @@ export function loop(): void {
       seenHostileIds = seenIds;
       for (const sighting of sightings) {
         log("hostile_sighted", sighting);
+      }
+
+      const tombstones = getCachedFind(room, FIND_TOMBSTONES);
+      const { kills, seenIds: seenTombstoneIds } = detectHostileKills(
+        tombstones,
+        seenHostileTombstoneIds
+      );
+      seenHostileTombstoneIds = seenTombstoneIds;
+      for (const kill of kills) {
+        log("hostile_killed", kill);
       }
 
       Memory.rooms[roomName] = Memory.rooms[roomName] || {};
