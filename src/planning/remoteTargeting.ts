@@ -31,11 +31,22 @@ function describeExitRooms(roomName: string): string[] {
 // zero legal candidates even though further rooms are perfectly reachable. Deduplicated
 // against the home room and tier 1 itself, so a loop back through a neighbor doesn't
 // reintroduce something already known as a "new" second-order candidate.
+//
+// A tier-1 room already confirmed keeper-guarded is skipped as a *gateway* into tier 2,
+// not just excluded as a mining target in its own right - found live: W55N25's only
+// route from home runs straight through W56N25's four active keeper lairs, and
+// travelToRoom has no hostile-room avoidance, so every reserver/scout/hauler sent there
+// died crossing it. Reading Memory directly (rather than requiring vision) means this
+// only protects against a gateway that's *already* been scouted - a still-unscouted
+// tier-1 room's exits are still offered, accepting the same one-time discovery cost
+// hasSourceKeeper itself does. A tier-2 room bordering more than one tier-1 gateway is
+// still reachable via any gateway that isn't keeper-guarded.
 export function getRemoteCandidateTiers(homeRoomName: string): string[][] {
   const tier1 = describeExitRooms(homeRoomName);
   const seen = new Set([homeRoomName, ...tier1]);
   const tier2: string[] = [];
   for (const room of tier1) {
+    if (Memory.rooms[room]?.remoteIntel?.hasSourceKeeper === true) continue;
     for (const exitRoom of describeExitRooms(room)) {
       if (seen.has(exitRoom)) continue;
       seen.add(exitRoom);

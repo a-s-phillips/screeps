@@ -71,6 +71,56 @@ describe("getRemoteCandidates", () => {
 
     expect(getRemoteCandidates("W9N8")).toEqual(["W9N9", "W8N8", "W9N10"]);
   });
+
+  it("skips a tier-1 room's exits when it's already confirmed keeper-guarded", () => {
+    // Reproduces the live bug: W55N25's only route from home runs through W56N25's
+    // keeper lairs, so once that's known, W55N25 must not be offered as a tier-2
+    // candidate through this gateway.
+    vi.stubGlobal("Game", {
+      map: {
+        describeExits: describeExitsFor({
+          W9N8: { "1": "W9N9", "3": "W8N8" },
+          W9N9: { "1": "W9N10" }
+        })
+      }
+    });
+    vi.stubGlobal("Memory", {
+      rooms: { W9N9: { remoteIntel: intel({ hasSourceKeeper: true }) } }
+    });
+
+    expect(getRemoteCandidates("W9N8")).toEqual(["W9N9", "W8N8"]);
+  });
+
+  it("still offers a tier-2 room reachable via a non-keeper gateway even if another gateway is guarded", () => {
+    vi.stubGlobal("Game", {
+      map: {
+        describeExits: describeExitsFor({
+          W9N8: { "1": "W9N9", "3": "W8N8" },
+          W9N9: { "1": "W9N10" },
+          W8N8: { "1": "W9N10" }
+        })
+      }
+    });
+    vi.stubGlobal("Memory", {
+      rooms: { W9N9: { remoteIntel: intel({ hasSourceKeeper: true }) } }
+    });
+
+    expect(getRemoteCandidates("W9N8")).toEqual(["W9N9", "W8N8", "W9N10"]);
+  });
+
+  it("still offers a tier-1 room's exits while it remains unscouted, accepting the discovery cost", () => {
+    vi.stubGlobal("Game", {
+      map: {
+        describeExits: describeExitsFor({
+          W9N8: { "1": "W9N9" },
+          W9N9: { "1": "W9N10" }
+        })
+      }
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    expect(getRemoteCandidates("W9N8")).toEqual(["W9N9", "W9N10"]);
+  });
 });
 
 function intel(overrides: Partial<RemoteIntel> = {}): RemoteIntel {
@@ -270,6 +320,34 @@ describe("resolveNextRemoteRoom", () => {
       // W8N8 (still a direct exit) has no recorded intel yet - a closer candidate might
       // still turn out viable, so this must not skip ahead to W9N10.
       W9N10: { remoteIntel: intel({ sourceCount: 1 }) }
+    });
+
+    expect(result).toBeUndefined();
+    expect(homeMemory.remoteRooms).toBeUndefined();
+  });
+
+  it("does not resolve a tier-2 room whose only known gateway is keeper-guarded", () => {
+    // End-to-end reproduction of the live bug: W8N8 is a confirmed keeper room and the
+    // only other tier-1 exit is non-viable, so the picker would normally fall through
+    // to tier 2 - but W8N8's only exit (W7N8) must never be offered there, even though
+    // it would otherwise win easily on source count, since the only known route to it
+    // crosses W8N8's keeper lairs.
+    vi.stubGlobal("Game", {
+      map: {
+        describeExits: describeExitsFor({
+          W9N8: { "1": "W9N9", "3": "W8N8" },
+          W9N9: {},
+          W8N8: { "1": "W7N8" }
+        })
+      }
+    });
+    vi.stubGlobal("Memory", { rooms: { W8N8: { remoteIntel: intel({ hasSourceKeeper: true }) } } });
+    const homeMemory: RoomMemory = {};
+
+    const result = resolveNextRemoteRoom("W9N8", homeMemory, {
+      W9N9: { remoteIntel: intel({ ownedByOther: true }) },
+      W8N8: { remoteIntel: intel({ hasSourceKeeper: true }) },
+      W7N8: { remoteIntel: intel({ sourceCount: 99 }) }
     });
 
     expect(result).toBeUndefined();
