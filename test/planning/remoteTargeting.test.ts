@@ -9,6 +9,14 @@ import {
   REMOTE_HOSTILE_MEMORY_WINDOW,
   resolveNextRemoteRoom
 } from "../../src/planning/remoteTargeting";
+
+// A per-room exit map for tests that need genuinely different exits per room, rather
+// than the single fixed mockReturnValue used by the rest of this file (which happens to
+// make every tier-2 lookup collapse back to already-seen rooms, exercising none of the
+// two-hop expansion).
+function describeExitsFor(map: Record<string, Record<string, string>>) {
+  return vi.fn((roomName: string) => map[roomName] ?? null);
+}
 import { resetRoomCache } from "../../src/utils/roomCache";
 
 describe("getRemoteCandidates", () => {
@@ -28,6 +36,40 @@ describe("getRemoteCandidates", () => {
     vi.stubGlobal("Game", { map: { describeExits: vi.fn().mockReturnValue(null) } });
 
     expect(getRemoteCandidates("W9N8")).toEqual([]);
+  });
+
+  it("includes second-order neighbors, one hop past each direct exit", () => {
+    // Reproduces the live gap: a home room whose direct exits are all already spoken
+    // for (staffed, owned, reserved, or a keeper room) has nothing left to pick from
+    // among tier 1 alone - the picker needs to see one hop further to have any legal
+    // candidate at all.
+    vi.stubGlobal("Game", {
+      map: {
+        describeExits: describeExitsFor({
+          W9N8: { "1": "W9N9", "3": "W8N8" },
+          W9N9: { "1": "W9N10" },
+          W8N8: { "3": "W7N8" }
+        })
+      }
+    });
+
+    expect(getRemoteCandidates("W9N8")).toEqual(["W9N9", "W8N8", "W9N10", "W7N8"]);
+  });
+
+  it("deduplicates second-order rooms that are also a direct exit or the home room itself", () => {
+    vi.stubGlobal("Game", {
+      map: {
+        describeExits: describeExitsFor({
+          W9N8: { "1": "W9N9", "3": "W8N8" },
+          // W9N9 borders the home room and the other direct exit - neither should be
+          // reintroduced as a "new" second-order candidate.
+          W9N9: { "1": "W9N8", "3": "W8N8", "5": "W9N10" },
+          W8N8: { "1": "W9N9" }
+        })
+      }
+    });
+
+    expect(getRemoteCandidates("W9N8")).toEqual(["W9N9", "W8N8", "W9N10"]);
   });
 });
 
@@ -187,6 +229,51 @@ describe("resolveNextRemoteRoom", () => {
 
     expect(result).toBe("W8N8");
     expect(homeMemory.remoteRooms).toEqual(["W8N8"]);
+  });
+
+  it("falls through to second-order candidates once every direct exit is known and non-viable", () => {
+    vi.stubGlobal("Game", {
+      map: {
+        describeExits: describeExitsFor({
+          W9N8: { "1": "W9N9", "3": "W8N8" },
+          W9N9: { "1": "W9N10" },
+          W8N8: {}
+        })
+      }
+    });
+    const homeMemory: RoomMemory = {};
+
+    const result = resolveNextRemoteRoom("W9N8", homeMemory, {
+      W9N9: { remoteIntel: intel({ ownedByOther: true }) },
+      W8N8: { remoteIntel: intel({ hasSourceKeeper: true }) },
+      W9N10: { remoteIntel: intel({ sourceCount: 1 }) }
+    });
+
+    expect(result).toBe("W9N10");
+    expect(homeMemory.remoteRooms).toEqual(["W9N10"]);
+  });
+
+  it("does not skip ahead to second-order candidates while a direct exit is still unscouted, even if the scouted ones are all non-viable", () => {
+    vi.stubGlobal("Game", {
+      map: {
+        describeExits: describeExitsFor({
+          W9N8: { "1": "W9N9", "3": "W8N8" },
+          W9N9: { "1": "W9N10" },
+          W8N8: {}
+        })
+      }
+    });
+    const homeMemory: RoomMemory = {};
+
+    const result = resolveNextRemoteRoom("W9N8", homeMemory, {
+      W9N9: { remoteIntel: intel({ ownedByOther: true }) },
+      // W8N8 (still a direct exit) has no recorded intel yet - a closer candidate might
+      // still turn out viable, so this must not skip ahead to W9N10.
+      W9N10: { remoteIntel: intel({ sourceCount: 1 }) }
+    });
+
+    expect(result).toBeUndefined();
+    expect(homeMemory.remoteRooms).toBeUndefined();
   });
 
   it("still resolves one more when exactly one slot under MAX_REMOTE_ROOMS remains", () => {

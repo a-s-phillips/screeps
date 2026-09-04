@@ -20,9 +20,33 @@ export function isRoomOwnedByOther(remoteIntel: RemoteIntel | undefined): boolea
 }
 
 // Static map exit topology - no vision required, works for a room the bot has never seen.
-export function getRemoteCandidates(homeRoomName: string): string[] {
-  const exits = Game.map.describeExits(homeRoomName);
+function describeExitRooms(roomName: string): string[] {
+  const exits = Game.map.describeExits(roomName);
   return exits ? Object.values(exits) : [];
+}
+
+// Tier 1: direct exits of the home room. Tier 2: exits of those rooms, one hop further -
+// needed because a home room's direct exits can all end up already spoken for at once
+// (staffed, owned by another player, reserved, or a keeper room), leaving the picker with
+// zero legal candidates even though further rooms are perfectly reachable. Deduplicated
+// against the home room and tier 1 itself, so a loop back through a neighbor doesn't
+// reintroduce something already known as a "new" second-order candidate.
+export function getRemoteCandidateTiers(homeRoomName: string): string[][] {
+  const tier1 = describeExitRooms(homeRoomName);
+  const seen = new Set([homeRoomName, ...tier1]);
+  const tier2: string[] = [];
+  for (const room of tier1) {
+    for (const exitRoom of describeExitRooms(room)) {
+      if (seen.has(exitRoom)) continue;
+      seen.add(exitRoom);
+      tier2.push(exitRoom);
+    }
+  }
+  return [tier1, tier2];
+}
+
+export function getRemoteCandidates(homeRoomName: string): string[] {
+  return getRemoteCandidateTiers(homeRoomName).flat();
 }
 
 // Not ready to decide until every candidate has recorded intel - a candidate the bot
@@ -58,6 +82,13 @@ export const MAX_REMOTE_ROOMS = 2;
 // re-evaluated in v1 (no story yet for "the choice turned out worse than expected").
 // Resolves at most one additional room per call - the caller re-calls this once the
 // newly-resolved room's own spawn needs are satisfied, same as any other role target.
+//
+// Evaluated tier by tier (direct exits first, then one hop further) rather than as one
+// flat pool - pickBestCandidate already refuses to decide until every candidate it's
+// given has recorded intel, and a flat ~20-room pool would then block a decision until
+// every single one of them was scouted, even when a much closer candidate might already
+// be viable. Tier by tier, a wider search only starts once the closer one is fully known
+// and confirmed to have nothing usable in it.
 export function resolveNextRemoteRoom(
   homeRoomName: string,
   homeMemory: RoomMemory,
@@ -66,19 +97,25 @@ export function resolveNextRemoteRoom(
   const chosen = homeMemory.remoteRooms ?? [];
   if (chosen.length >= MAX_REMOTE_ROOMS) return undefined;
 
-  const candidates = getRemoteCandidates(homeRoomName).filter(
-    (candidate) => !chosen.includes(candidate)
-  );
-  const intelByRoom: Record<string, RemoteIntel | undefined> = {};
-  for (const candidate of candidates) {
-    intelByRoom[candidate] = candidateMemories[candidate]?.remoteIntel;
+  for (const tier of getRemoteCandidateTiers(homeRoomName)) {
+    const candidates = tier.filter((candidate) => !chosen.includes(candidate));
+    if (candidates.length === 0) continue;
+
+    const intelByRoom: Record<string, RemoteIntel | undefined> = {};
+    for (const candidate of candidates) {
+      intelByRoom[candidate] = candidateMemories[candidate]?.remoteIntel;
+    }
+
+    const best = pickBestCandidate(candidates, intelByRoom);
+    if (best) {
+      homeMemory.remoteRooms = [...chosen, best];
+      return best;
+    }
+
+    if (candidates.some((candidate) => intelByRoom[candidate] === undefined)) return undefined;
   }
 
-  const best = pickBestCandidate(candidates, intelByRoom);
-  if (!best) return undefined;
-
-  homeMemory.remoteRooms = [...chosen, best];
-  return best;
+  return undefined;
 }
 
 // Overwritten every tick while visible, so it can't go stale while a scout/reserver/
