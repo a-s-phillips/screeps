@@ -216,7 +216,9 @@ export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | n
 
 // Only called once the home room's own economy is fully staffed for this tick (see
 // hasUnmetLocalNeed in spawnManager.ts) - remote expansion must never compete with local
-// needs for spawn time.
+// needs for spawn time. That gate, and decideNextSpawn's own defender pre-empts ahead of
+// it, are untouched by everything below - scouting can only ever cede ground within the
+// remote-spawning slice of priority, never home-room economy or defense.
 export function decideRemoteSpawn(room: Room): SpawnDecision | null {
   Memory.rooms[room.name] = Memory.rooms[room.name] || {};
   const homeMemory = Memory.rooms[room.name];
@@ -236,6 +238,38 @@ export function decideRemoteSpawn(room: Room): SpawnDecision | null {
     if (decision) return decision;
   }
 
+  // Short-circuit before touching Game.map or rescanning candidate memory at all once at
+  // cap - this room will never need a new target again.
+  const candidateMemories: Record<string, RoomMemory | undefined> = {};
+  if (resolvedRooms.length < MAX_REMOTE_ROOMS) {
+    const candidates = getRemoteCandidates(room.name).filter(
+      (candidate) => !resolvedRooms.includes(candidate)
+    );
+    for (const candidate of candidates) {
+      candidateMemories[candidate] = Memory.rooms[candidate];
+    }
+
+    // Scouting an unscouted candidate jumps ahead of routine restaffing of already-
+    // resolved rooms (the round-robin below) - a deliberate tradeoff, unlike the
+    // unbootstrapped pre-empt above. An ongoing contest over an existing remote (a rival
+    // out-reserving us, a repeatedly-destroyed container, etc.) can otherwise keep
+    // decideNextRemoteSpawn finding *something* to do on literally every tick, which
+    // starved scouting entirely - one candidate went 11,000+ ticks unscouted purely
+    // because the round-robin never ran dry. A scout is one MOVE part (50E) and
+    // self-limits to one at a time (decideScoutSpawn's liveScoutTargets check), so
+    // ceding a handful of remote-restaffing spawn slots to it is a bounded, cheap cost -
+    // see this function's own top comment for why that cost never reaches home-room
+    // economy or defense.
+    const liveScoutTargets = new Set(
+      Object.values(Game.creeps)
+        .filter((creep) => creep.memory.role === "scout")
+        .map((creep) => creep.memory.remoteRoom)
+        .filter((remoteRoom): remoteRoom is string => remoteRoom !== undefined)
+    );
+    const scoutDecision = decideScoutSpawn(room.name, candidates, candidateMemories, liveScoutTargets);
+    if (scoutDecision) return scoutDecision;
+  }
+
   // Deliberate v1 simplification, not full round-robin fairness: room 1's outstanding
   // need beats room 2's. The one case where that actually bites (a from-scratch room 2)
   // is already covered by the bootstrap pre-empt above.
@@ -244,29 +278,12 @@ export function decideRemoteSpawn(room: Room): SpawnDecision | null {
     if (decision) return decision;
   }
 
-  // Short-circuit before touching Game.map or rescanning candidate memory at all once at
-  // cap - this room will never need a new target again.
   if (resolvedRooms.length >= MAX_REMOTE_ROOMS) return null;
-
-  const candidates = getRemoteCandidates(room.name).filter(
-    (candidate) => !resolvedRooms.includes(candidate)
-  );
-  const candidateMemories: Record<string, RoomMemory | undefined> = {};
-  for (const candidate of candidates) {
-    candidateMemories[candidate] = Memory.rooms[candidate];
-  }
 
   const newRemoteRoomName = resolveNextRemoteRoom(room.name, homeMemory, candidateMemories);
   if (newRemoteRoomName) {
     return decideNextRemoteSpawn(buildRemoteRoomState(room, newRemoteRoomName));
   }
 
-  const liveScoutTargets = new Set(
-    Object.values(Game.creeps)
-      .filter((creep) => creep.memory.role === "scout")
-      .map((creep) => creep.memory.remoteRoom)
-      .filter((remoteRoom): remoteRoom is string => remoteRoom !== undefined)
-  );
-
-  return decideScoutSpawn(room.name, candidates, candidateMemories, liveScoutTargets);
+  return null;
 }

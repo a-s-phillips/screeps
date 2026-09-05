@@ -231,6 +231,34 @@ describe("decideRemoteSpawn", () => {
     expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W9N7" });
   });
 
+  it("spawns a scout ahead of an already-resolved room's routine restaffing need", () => {
+    // W8N8 has a reserver (so it isn't "unbootstrapped") but still has a routine unmet
+    // need - a source without a container wants a remoteHarvester. W9N7 is a second
+    // tier-1 exit with no recorded intel yet. An ongoing contest over W8N8 (a rival
+    // out-reserving us, a repeatedly-destroyed container, etc.) can otherwise keep
+    // producing a routine unmet need on every single tick, starving scouting of W9N7
+    // indefinitely - the carve-out means the scout wins this tick regardless.
+    const remoteRoom1 = mockVisibleRemoteRoom({
+      name: "W8N8",
+      sources: [{ id: "s1", pos: { x: 10, y: 10 } }]
+    });
+    vi.stubGlobal("Game", {
+      map: {
+        describeExits: vi.fn((roomName: string) =>
+          roomName === "W9N8" ? { "1": "W8N8", "3": "W9N7" } : {}
+        )
+      },
+      creeps: { r1: { memory: { role: "reserver", remoteRoom: "W8N8" } } },
+      rooms: { W8N8: remoteRoom1 }
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { remoteRooms: ["W8N8"] } } });
+
+    const decision = decideRemoteSpawn(mockRoom("W9N8"));
+
+    expect(decision?.role).toBe("scout");
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W9N7" });
+  });
+
   it("returns null and never touches Game.map once at cap with every resolved room fully staffed", () => {
     vi.stubGlobal("Game", {
       map: { describeExits: vi.fn() },
