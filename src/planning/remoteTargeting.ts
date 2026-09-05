@@ -129,11 +129,18 @@ export function resolveNextRemoteRoom(
   return undefined;
 }
 
+// Single source of truth for "who are we" - reserver.ts also needs this to tell its own
+// reservation renewal apart from a rival's, and duplicating the lookup risks the two
+// drifting apart on how "us" is identified.
+export function getMyUsername(): string | undefined {
+  return Object.values(Game.spawns)[0]?.owner.username;
+}
+
 // Overwritten every tick while visible, so it can't go stale while a scout/reserver/
 // remoteHarvester is present - called for every room the bot currently has vision into,
 // not just chosen remote targets, so intel is ready the moment a candidate is scouted.
 export function recordRemoteIntel(room: Room, memory: RoomMemory): void {
-  const myUsername = Object.values(Game.spawns)[0]?.owner.username;
+  const myUsername = getMyUsername();
   const controller = room.controller;
 
   memory.remoteIntel = {

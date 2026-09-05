@@ -117,8 +117,24 @@ describe("planScoutBody", () => {
 });
 
 describe("planReserverBody", () => {
-  it("is always CLAIM + MOVE, regardless of capacity", () => {
+  it("defaults to a single CLAIM + MOVE when no claim count is given", () => {
     expect(planReserverBody()).toEqual([CLAIM, MOVE]);
+  });
+
+  it("repeats CLAIM + MOVE once per requested claim part", () => {
+    expect(planReserverBody(3)).toEqual([CLAIM, MOVE, CLAIM, MOVE, CLAIM, MOVE]);
+  });
+
+  it("clamps below 1 up to a single CLAIM + MOVE", () => {
+    expect(planReserverBody(0)).toEqual([CLAIM, MOVE]);
+    expect(planReserverBody(-2)).toEqual([CLAIM, MOVE]);
+  });
+
+  it("caps at MAX_CREEP_SIZE parts even when far more claim parts are requested", () => {
+    const body = planReserverBody(100);
+
+    expect(body.length).toBe(MAX_CREEP_SIZE);
+    expect(body.filter((part) => part === CLAIM)).toHaveLength(MAX_CREEP_SIZE / 2);
   });
 });
 

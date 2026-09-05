@@ -66,8 +66,18 @@ export function planScoutBody(): BodyPartConstant[] {
   return [MOVE];
 }
 
-export function planReserverBody(): BodyPartConstant[] {
-  return [CLAIM, MOVE];
+// claimParts scales with how many CLAIM parts it takes to win a reservation contest
+// (see remoteSpawnManager.ts's neededClaimParts) - attackController and reserveController
+// both move a controller's reservation endTime by exactly 1 tick per CLAIM part per tick
+// (CONTROLLER_RESERVE), symmetric regardless of which side is contesting, so out-reserving
+// a rival is purely a question of fielding more CLAIM parts than they have. Uncontested
+// callers omit the argument and get the old fixed 1-CLAIM body back.
+export function planReserverBody(claimParts = 1): BodyPartConstant[] {
+  const repeats = Math.min(Math.max(claimParts, 1), Math.floor(MAX_CREEP_SIZE / 2));
+
+  const body: BodyPartConstant[] = [];
+  for (let i = 0; i < repeats; i++) body.push(CLAIM, MOVE);
+  return body;
 }
 
 export function planBody(role: BlockRole, energyCapacityAvailable: number): BodyPartConstant[] {

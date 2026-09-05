@@ -16,6 +16,16 @@ beforeEach(() => {
   resetRoomCache();
 });
 
+// buildRemoteRoomState now counts active CLAIM parts on our own Game.creeps reservers
+// (not just headcount), so mock reservers need a real body - defaults to 1 CLAIM part,
+// matching the fixed body every reserver had before that counting existed.
+function reserverCreep(remoteRoom: string, claimParts = 1) {
+  return {
+    memory: { role: "reserver", remoteRoom },
+    body: Array.from({ length: claimParts }, () => ({ type: CLAIM, hits: 100 }))
+  };
+}
+
 describe("decideScoutSpawn", () => {
   it("spawns a scout for the first candidate with no recorded intel and no scout en route", () => {
     const decision = decideScoutSpawn("W9N8", ["W9N9", "W8N8"], {}, new Set());
@@ -150,7 +160,7 @@ describe("decideRemoteSpawn", () => {
   it("seeks a second remote room once the first is fully staffed and the cap allows it", () => {
     vi.stubGlobal("Game", {
       map: { describeExits: vi.fn().mockReturnValue({ "1": "W8N8", "3": "W9N7" }) },
-      creeps: { r1: { memory: { role: "reserver", remoteRoom: "W8N8" } } },
+      creeps: { r1: reserverCreep("W8N8") },
       rooms: {}
     });
     vi.stubGlobal("Memory", { rooms: { W9N8: { remoteRooms: ["W8N8"] } } });
@@ -169,8 +179,8 @@ describe("decideRemoteSpawn", () => {
     vi.stubGlobal("Game", {
       map: { describeExits: vi.fn() },
       creeps: {
-        r1: { memory: { role: "reserver", remoteRoom: "W8N8" } },
-        r2: { memory: { role: "reserver", remoteRoom: "W9N7" } },
+        r1: reserverCreep("W8N8"),
+        r2: reserverCreep("W9N7"),
         m2: { memory: { role: "miner", remoteRoom: "W9N7", sourceId: "s2" } }
       },
       rooms: { W9N7: remoteRoom2 }
@@ -197,9 +207,9 @@ describe("decideRemoteSpawn", () => {
     vi.stubGlobal("Game", {
       map: { describeExits: vi.fn() },
       creeps: {
-        r1: { memory: { role: "reserver", remoteRoom: "W8N8" } },
+        r1: reserverCreep("W8N8"),
         m1: { memory: { role: "miner", remoteRoom: "W8N8", sourceId: "s1" } },
-        r2: { memory: { role: "reserver", remoteRoom: "W9N7" } },
+        r2: reserverCreep("W9N7"),
         m2: { memory: { role: "miner", remoteRoom: "W9N7", sourceId: "s2" } }
       },
       rooms: { W8N8: remoteRoom1, W9N7: remoteRoom2 }
@@ -220,7 +230,7 @@ describe("decideRemoteSpawn", () => {
     });
     vi.stubGlobal("Game", {
       map: { describeExits: vi.fn() },
-      creeps: { r1: { memory: { role: "reserver", remoteRoom: "W8N8" } } },
+      creeps: { r1: reserverCreep("W8N8") },
       rooms: { W8N8: remoteRoom1 }
     });
     vi.stubGlobal("Memory", { rooms: { W9N8: { remoteRooms: ["W8N8", "W9N7"] } } });
@@ -248,7 +258,7 @@ describe("decideRemoteSpawn", () => {
           roomName === "W9N8" ? { "1": "W8N8", "3": "W9N7" } : {}
         )
       },
-      creeps: { r1: { memory: { role: "reserver", remoteRoom: "W8N8" } } },
+      creeps: { r1: reserverCreep("W8N8") },
       rooms: { W8N8: remoteRoom1 }
     });
     vi.stubGlobal("Memory", { rooms: { W9N8: { remoteRooms: ["W8N8"] } } });
@@ -263,8 +273,8 @@ describe("decideRemoteSpawn", () => {
     vi.stubGlobal("Game", {
       map: { describeExits: vi.fn() },
       creeps: {
-        r1: { memory: { role: "reserver", remoteRoom: "W8N8" } },
-        r2: { memory: { role: "reserver", remoteRoom: "W9N7" } }
+        r1: reserverCreep("W8N8"),
+        r2: reserverCreep("W9N7")
       },
       rooms: {}
     });
@@ -284,6 +294,12 @@ function baseRemoteState(overrides: Partial<RemoteRoomState> = {}): RemoteRoomSt
     hostileRecentlySeen: false,
     ownedByOther: false,
     reserverCount: 0,
+    // Mirrors the old fixed 1-CLAIM reserver body: a test that only overrides
+    // reserverCount (most of them, below) gets one CLAIM part per reserver for free,
+    // same as before this field existed. Tests exercising a reservation contest override
+    // ourReserverClaimParts/hostileReservationClaimParts explicitly instead.
+    ourReserverClaimParts: overrides.ourReserverClaimParts ?? overrides.reserverCount ?? 0,
+    hostileReservationClaimParts: 0,
     remoteHarvesterCount: 0,
     remoteHaulerCount: 0,
     sourcesWithoutContainerCount: 0,
@@ -442,17 +458,65 @@ describe("decideNextRemoteSpawn", () => {
 
     expect(decision).toBeNull();
   });
+
+  it("reinforces the reserver with enough CLAIM parts to overturn a rival's reservation", () => {
+    // A rival fielding 2 CLAIM parts out-reserves our existing 1-CLAIM reserver forever
+    // (both actions move the reservation timer by 1 tick per CLAIM part per tick) - the
+    // fix needs 2 more CLAIM parts, not just a flat replacement, to net ahead at 3 vs 2.
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        ourReserverClaimParts: 1,
+        hostileReservationClaimParts: 2,
+        energyAvailable: 5000,
+        energyCapacityAvailable: 5000
+      })
+    );
+
+    expect(decision?.role).toBe("reserver");
+    expect(decision?.body).toEqual([CLAIM, MOVE, CLAIM, MOVE]);
+  });
+
+  it("stops reinforcing once our CLAIM parts already outnumber the rival's", () => {
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        ourReserverClaimParts: 3,
+        hostileReservationClaimParts: 2,
+        sourcesWithoutContainerCount: 1
+      })
+    );
+
+    expect(decision?.role).toBe("remoteHarvester");
+  });
+
+  it("returns null when a reservation-contest reinforcement is unaffordable", () => {
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        ourReserverClaimParts: 1,
+        hostileReservationClaimParts: 2,
+        energyAvailable: 100
+      })
+    );
+
+    expect(decision).toBeNull();
+  });
 });
 
 function mockVisibleRemoteRoom(opts: {
   name: string;
   sources?: { id: string; pos: { x: number; y: number } }[];
   containers?: { id: string; pos: { x: number; y: number } }[];
+  hostileClaimParts?: number[];
 }) {
   const sources = opts.sources ?? [];
   const containers = (opts.containers ?? []).map((c) => ({
     ...c,
     structureType: STRUCTURE_CONTAINER
+  }));
+  const hostiles = (opts.hostileClaimParts ?? []).map((claimParts) => ({
+    body: Array.from({ length: claimParts }, () => ({ type: CLAIM, hits: 100 }))
   }));
 
   return {
@@ -460,6 +524,7 @@ function mockVisibleRemoteRoom(opts: {
     find: vi.fn((type: FindConstant) => {
       if (type === FIND_SOURCES) return sources;
       if (type === FIND_STRUCTURES) return containers;
+      if (type === FIND_HOSTILE_CREEPS) return hostiles;
       return [];
     })
   };
@@ -475,7 +540,7 @@ describe("buildRemoteRoomState", () => {
       time: 1000,
       rooms: {},
       creeps: {
-        r1: { memory: { role: "reserver", remoteRoom: "W8N8" } },
+        r1: reserverCreep("W8N8"),
         rh1: { memory: { role: "remoteHarvester", remoteRoom: "W8N8" } },
         rh2: { memory: { role: "remoteHarvester", remoteRoom: "W9N7" } },
         rl1: { memory: { role: "remoteHauler", remoteRoom: "W8N8" } },
@@ -489,6 +554,42 @@ describe("buildRemoteRoomState", () => {
     expect(state.reserverCount).toBe(1);
     expect(state.remoteHarvesterCount).toBe(1);
     expect(state.remoteHaulerCount).toBe(1);
+  });
+
+  it("sums active CLAIM parts across our own reservers assigned to this remote room", () => {
+    vi.stubGlobal("Game", {
+      time: 1000,
+      rooms: {},
+      creeps: {
+        r1: reserverCreep("W8N8", 2),
+        r2: reserverCreep("W8N8", 1),
+        r3: reserverCreep("W9N7", 5)
+      }
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.ourReserverClaimParts).toBe(3);
+  });
+
+  it("sums active CLAIM parts across hostile creeps currently visible in the remote room", () => {
+    const remoteRoom = mockVisibleRemoteRoom({ name: "W8N8", hostileClaimParts: [2, 1] });
+    vi.stubGlobal("Game", { time: 1000, creeps: {}, rooms: { W8N8: remoteRoom } });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.hostileReservationClaimParts).toBe(3);
+  });
+
+  it("defaults hostileReservationClaimParts to zero when the remote room isn't visible", () => {
+    vi.stubGlobal("Game", { time: 1000, creeps: {}, rooms: {} });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.hostileReservationClaimParts).toBe(0);
   });
 
   it("reports a recently-seen hostile within the remote-room recency window", () => {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  getMyUsername,
   getRemoteCandidates,
   isRoomHostile,
   isRoomOwnedByOther,
@@ -429,6 +430,24 @@ describe("isRoomOwnedByOther", () => {
 
   it("is true when the room is owned by another player", () => {
     expect(isRoomOwnedByOther(intel({ ownedByOther: true }))).toBe(true);
+  });
+});
+
+describe("getMyUsername", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reads the username off our first spawn", () => {
+    vi.stubGlobal("Game", { spawns: { Spawn1: { owner: { username: "me" } } } });
+
+    expect(getMyUsername()).toBe("me");
+  });
+
+  it("returns undefined when we have no spawns", () => {
+    vi.stubGlobal("Game", { spawns: {} });
+
+    expect(getMyUsername()).toBeUndefined();
   });
 });
 

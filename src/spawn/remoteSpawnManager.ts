@@ -73,6 +73,8 @@ export interface RemoteRoomState {
   hostileRecentlySeen: boolean;
   ownedByOther: boolean;
   reserverCount: number;
+  ourReserverClaimParts: number;
+  hostileReservationClaimParts: number;
   remoteHarvesterCount: number;
   remoteHaulerCount: number;
   sourcesWithoutContainerCount: number;
@@ -80,6 +82,28 @@ export interface RemoteRoomState {
   remoteContainerCount: number;
   energyAvailable: number;
   energyCapacityAvailable: number;
+}
+
+// attackController and reserveController both move a controller's reservation endTime by
+// exactly 1 tick per active CLAIM part per tick (CONTROLLER_RESERVE) - counting active
+// CLAIM parts on either side is the whole basis for deciding who's winning a reservation
+// contest, not just how many reserver creeps exist.
+function countActiveClaimParts(body: BodyPartDefinition[]): number {
+  return body.filter((part) => part.type === CLAIM && part.hits > 0).length;
+}
+
+// Requires live vision into the remote room, same as buildRemoteSourceState - defaults to
+// 0 when it isn't visible, since an unseen rival reservation can't be measured and treating
+// it as 0 pressure is the same "no vision -> assume uncontested" convention used elsewhere
+// in this file.
+function countHostileReservationClaimParts(remoteRoomName: string): number {
+  const remoteRoom = Game.rooms[remoteRoomName];
+  if (!remoteRoom) return 0;
+
+  return getCachedFind(remoteRoom, FIND_HOSTILE_CREEPS).reduce(
+    (sum, hostile) => sum + countActiveClaimParts(hostile.body),
+    0
+  );
 }
 
 // Sources/containers require live vision into the remote room (only present while the
@@ -121,13 +145,17 @@ export function buildRemoteRoomState(homeRoom: Room, remoteRoomName: string): Re
   const lastHostileSeenTick = remoteMemory?.lastHostileSeenTick;
 
   let reserverCount = 0;
+  let ourReserverClaimParts = 0;
   let remoteHarvesterCount = 0;
   let remoteHaulerCount = 0;
   const minerSourceIds = new Set<Id<Source>>();
   for (const name in Game.creeps) {
     const creep = Game.creeps[name];
     if (creep.memory.remoteRoom !== remoteRoomName) continue;
-    if (creep.memory.role === "reserver") reserverCount++;
+    if (creep.memory.role === "reserver") {
+      reserverCount++;
+      ourReserverClaimParts += countActiveClaimParts(creep.body);
+    }
     if (creep.memory.role === "remoteHarvester") remoteHarvesterCount++;
     if (creep.memory.role === "remoteHauler") remoteHaulerCount++;
     if (creep.memory.role === "miner" && creep.memory.sourceId) {
@@ -141,6 +169,8 @@ export function buildRemoteRoomState(homeRoom: Room, remoteRoomName: string): Re
     hostileRecentlySeen: isRoomHostile(lastHostileSeenTick, Game.time),
     ownedByOther: isRoomOwnedByOther(remoteMemory?.remoteIntel),
     reserverCount,
+    ourReserverClaimParts,
+    hostileReservationClaimParts: countHostileReservationClaimParts(remoteRoomName),
     remoteHarvesterCount,
     remoteHaulerCount,
     ...buildRemoteSourceState(remoteRoomName, minerSourceIds),
@@ -162,8 +192,17 @@ export function buildRemoteRoomState(homeRoom: Room, remoteRoomName: string): Re
 export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | null {
   if (state.hostileRecentlySeen || state.ownedByOther) return null;
 
-  if (state.reserverCount === 0) {
-    const body = planReserverBody();
+  // "Enough reserver" isn't a headcount, it's a CLAIM-part tally: attackController and
+  // reserveController both move a controller's reservation endTime by 1 tick per CLAIM
+  // part per tick, symmetric for whoever's contesting it, so a rival fielding more CLAIM
+  // parts than our lone reserver simply out-reserves it forever no matter how long it
+  // sits there (found live in W57N24 - a 1-CLAIM reserver never even dented a 2-CLAIM
+  // rival's reservation). Sizing to exactly one more than the rival's current CLAIM count
+  // is the minimum body that actually reverses the reservation's direction instead of just
+  // slowing its growth.
+  const neededClaimParts = state.hostileReservationClaimParts + 1;
+  if (state.ourReserverClaimParts < neededClaimParts) {
+    const body = planReserverBody(neededClaimParts - state.ourReserverClaimParts);
     if (bodyCost(body) <= state.energyAvailable) {
       return {
         role: "reserver",
