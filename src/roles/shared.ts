@@ -65,7 +65,7 @@ export function harvestFromNearestSource(creep: Creep): void {
 
 // The container built next to our own controller (see roomPlanner.ts's planContainers) -
 // a delivery target for haulers/deliverers, never a pickup source (see
-// withdrawFromFullestContainer's exclusion). Guarded on room.controller.my so a creep
+// collectFullestEnergy's exclusion). Guarded on room.controller.my so a creep
 // delivering in some other room (shouldn't happen given every caller only delivers once
 // home, but kept defensive per the tick-boundary convention) never mistakes an unowned
 // controller's container for ours.
@@ -163,11 +163,58 @@ function findFullestContainer(
   });
 }
 
-export function withdrawFromFullestContainer(creep: Creep, exclude?: StructureContainer): boolean {
-  const target = findFullestContainer(creep, exclude);
+function isDroppedEnergy(candidate: StructureContainer | Resource): candidate is Resource {
+  return "amount" in candidate;
+}
+
+function energyAmount(candidate: StructureContainer | Resource): number {
+  return isDroppedEnergy(candidate) ? candidate.amount : candidate.store.getUsedCapacity(RESOURCE_ENERGY);
+}
+
+// Dropped energy competes for priority in the same biggest-wins pool as containers
+// (see findFullestContainer above) rather than only ever being a last-resort fallback -
+// a spilled pile decays a fixed amount every tick, so leaving it strictly lowest
+// priority risks losing the whole pile while a hauler cycles between containers that
+// aren't going anywhere. Found live: a remote room's queued construction-site energy
+// spilled onto the ground after a hostile creep interrupted the builder working the
+// site, and nothing in the hauler/remoteHauler pickup path ever called pickup() to
+// reclaim it - it just decayed, unclaimed, indefinitely.
+function findFullestEnergyPickup(
+  creep: Creep,
+  exclude?: StructureContainer
+): StructureContainer | Resource | undefined {
+  const containers = getCachedFind(creep.room, FIND_STRUCTURES).filter(
+    (structure): structure is StructureContainer =>
+      structure.structureType === STRUCTURE_CONTAINER &&
+      structure.id !== exclude?.id &&
+      structure.store.getUsedCapacity(RESOURCE_ENERGY) > 0
+  );
+  const dropped = getCachedFind(creep.room, FIND_DROPPED_RESOURCES).filter(
+    (resource) => resource.resourceType === RESOURCE_ENERGY
+  );
+
+  const candidates: (StructureContainer | Resource)[] = [...containers, ...dropped];
+  if (candidates.length === 0) return undefined;
+
+  return candidates.reduce((biggest, candidate) => {
+    const biggestAmount = energyAmount(biggest);
+    const candidateAmount = energyAmount(candidate);
+    if (candidateAmount > biggestAmount) return candidate;
+    if (candidateAmount < biggestAmount) return biggest;
+    return chebyshevDistance(creep.pos, candidate.pos) < chebyshevDistance(creep.pos, biggest.pos)
+      ? candidate
+      : biggest;
+  });
+}
+
+export function collectFullestEnergy(creep: Creep, exclude?: StructureContainer): boolean {
+  const target = findFullestEnergyPickup(creep, exclude);
   if (!target) return false;
 
-  if (creep.withdraw(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+  const result = isDroppedEnergy(target)
+    ? creep.pickup(target)
+    : creep.withdraw(target, RESOURCE_ENERGY);
+  if (result === ERR_NOT_IN_RANGE) {
     creep.moveTo(target, MOVE_OPTS);
   }
   return true;

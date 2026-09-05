@@ -1,9 +1,9 @@
 import {
+  collectFullestEnergy,
   decideWorkingState,
   deliverEnergy,
   retreatFromHostileRemote,
-  travelToRoom,
-  withdrawFromFullestContainer
+  travelToRoom
 } from "./shared";
 
 export function run(creep: Creep): void {
@@ -20,7 +20,7 @@ export function run(creep: Creep): void {
 
     if (!travelToRoom(creep, remoteRoom)) return;
 
-    withdrawFromFullestContainer(creep);
+    collectFullestEnergy(creep);
     return;
   }
 

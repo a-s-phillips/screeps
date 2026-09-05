@@ -1,9 +1,9 @@
 import {
+  collectFullestEnergy,
   decideWorkingState,
   deliverEnergy,
   findControllerContainer,
-  MOVE_OPTS,
-  withdrawFromFullestContainer
+  MOVE_OPTS
 } from "./shared";
 
 export function run(creep: Creep): void {
@@ -19,7 +19,7 @@ export function run(creep: Creep): void {
     // starving upgraders of the container's whole point. Found live: haulers were
     // parking next to it and cycling withdraw/deposit while source containers sat
     // nearly full, undrained, on the other side of the room.
-    withdrawFromFullestContainer(creep, findControllerContainer(creep.room));
+    collectFullestEnergy(creep, findControllerContainer(creep.room));
     return;
   }
 
