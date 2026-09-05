@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { run } from "../../src/roles/hauler";
-import { MOVE_OPTS } from "../../src/roles/shared";
+import { MOVE_OPTS, REMOTE_MOVE_OPTS } from "../../src/roles/shared";
 import { resetRoomCache } from "../../src/utils/roomCache";
 
 const container = { id: "container1", structureType: STRUCTURE_CONTAINER, pos: { x: 10, y: 10 } };
@@ -22,6 +22,8 @@ function mockCreep(opts: {
   spawnFreeCapacity?: number;
   controllerContainerFreeCapacity?: number;
   controllerContainerUsedEnergy?: number;
+  homeRoom?: string;
+  roomName?: string;
 }) {
   const hasContainer = opts.hasContainer ?? true;
 
@@ -57,7 +59,7 @@ function mockCreep(opts: {
   }
 
   const room = {
-    name: "W1N1",
+    name: opts.roomName ?? "W1N1",
     controller,
     find: vi.fn((type: FindConstant) => {
       if (type === FIND_STRUCTURES) return structures;
@@ -74,7 +76,7 @@ function mockCreep(opts: {
   };
 
   return {
-    memory: { role: "hauler", working: opts.working },
+    memory: { role: "hauler", working: opts.working, homeRoom: opts.homeRoom },
     room,
     pos: { findClosestByPath: vi.fn((targets: unknown[]) => targets[0] ?? null) },
     store: {
@@ -229,5 +231,42 @@ describe("hauler role", () => {
 
     expect(creep.transfer).not.toHaveBeenCalled();
     expect(creep.upgradeController).toHaveBeenCalledWith(controller);
+  });
+
+  // Regression coverage: found live on the official server - a hauler that ended up
+  // outside its home room (e.g. chasing dropped energy near a border) had no way back,
+  // since none of the logic above has a homeRoom-aware fallback of its own. It just sat
+  // in the wrong room forever, uselessly full, until it died.
+  describe("when outside its home room", () => {
+    it("travels home instead of running its normal logic", () => {
+      const creep = mockCreep({
+        working: true,
+        usedEnergy: 50,
+        freeCapacity: 0,
+        homeRoom: "W1N1",
+        roomName: "W2N1"
+      });
+
+      run(creep);
+
+      expect(creep.moveTo).toHaveBeenCalledWith(
+        expect.objectContaining({ roomName: "W1N1" }),
+        REMOTE_MOVE_OPTS
+      );
+      expect(creep.transfer).not.toHaveBeenCalled();
+      expect(creep.upgradeController).not.toHaveBeenCalled();
+      expect(creep.withdraw).not.toHaveBeenCalled();
+    });
+
+    it("runs its normal logic once homeRoom is unset (pre-fix creeps, or same-room haulers)", () => {
+      const creep = mockCreep({ working: false, usedEnergy: 0, freeCapacity: 100 });
+
+      run(creep);
+
+      expect(creep.withdraw).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "container1" }),
+        RESOURCE_ENERGY
+      );
+    });
   });
 });

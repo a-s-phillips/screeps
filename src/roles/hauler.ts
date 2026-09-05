@@ -3,10 +3,23 @@ import {
   decideWorkingState,
   deliverEnergy,
   findControllerContainer,
-  MOVE_OPTS
+  MOVE_OPTS,
+  travelToRoom
 } from "./shared";
 
 export function run(creep: Creep): void {
+  // A hauler's whole logic below assumes creep.room is home - none of it (unlike
+  // remoteHauler/reserver/etc) has a homeRoom-aware fallback of its own. Without this,
+  // a hauler that ever ends up outside its room for any reason (e.g. chasing dropped
+  // energy near a shared border) has no way back and is stranded there until it dies,
+  // silently doing nothing useful and no longer counting toward its room's hauler
+  // target - found live on the official server.
+  const homeRoom = creep.memory.homeRoom;
+  if (homeRoom && creep.room.name !== homeRoom) {
+    travelToRoom(creep, homeRoom);
+    return;
+  }
+
   const isEmpty = creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0;
   const isFull = creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0;
   const working = decideWorkingState(creep.memory.working, isEmpty, isFull);

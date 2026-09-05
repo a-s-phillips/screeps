@@ -349,8 +349,12 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
   if (!decision) return;
 
   const name = `${decision.role}_${Game.time}`;
+  // hauler.ts has no other way to learn its home room - all its logic otherwise assumes
+  // creep.room already is home (see the homeRoom fallback there for why that needs an
+  // anchor to travel back to).
+  const homeRoomMemory = decision.role === "hauler" ? { homeRoom: room.name } : {};
   const result = spawn.spawnCreep(decision.body, name, {
-    memory: { role: decision.role, working: false, ...decision.memory }
+    memory: { role: decision.role, working: false, ...homeRoomMemory, ...decision.memory }
   });
 
   if (result === OK) {

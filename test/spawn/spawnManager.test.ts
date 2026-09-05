@@ -699,8 +699,11 @@ describe("runSpawning", () => {
 
     runSpawning(spawn, mockRoom({ containers: 1 }));
 
+    // homeRoom lets a hauler that ends up outside its room for any reason (e.g. chasing
+    // dropped energy near a border) find its way back via travelToRoom, instead of being
+    // stranded there for the rest of its life - see hauler.ts.
     expect(spawn.spawnCreep).toHaveBeenCalledWith(expect.any(Array), "hauler_12345", {
-      memory: { role: "hauler", working: false }
+      memory: { role: "hauler", working: false, homeRoom: "W1N1" }
     });
   });
 
@@ -1026,7 +1029,7 @@ describe("runSpawning", () => {
     runSpawning(spawn, mockRoom({ containers: 1 }));
 
     expect(spawn.spawnCreep).toHaveBeenCalledWith(expect.any(Array), "hauler_12345", {
-      memory: { role: "hauler", working: false }
+      memory: { role: "hauler", working: false, homeRoom: "W1N1" }
     });
   });
 
