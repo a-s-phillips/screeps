@@ -108,7 +108,11 @@ describe("decideRemoteSpawn", () => {
     expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W9N9" });
   });
 
-  it("spawns a reserver once a remote room is resolved but has none yet, without touching Game.map", () => {
+  // Game.map.describeExits is now checked first (see the scout-priority comment below),
+  // so this no longer skips it the way it used to when the bootstrap pre-empt ran first -
+  // describeExits is free in Screeps, so that lost optimization isn't a correctness
+  // concern, just a behavior this test used to (incidentally) lock in.
+  it("spawns a reserver once a remote room is resolved but has none yet and no candidate needs scouting", () => {
     vi.stubGlobal("Game", { map: { describeExits: vi.fn() }, creeps: {}, rooms: {} });
     vi.stubGlobal("Memory", { rooms: { W9N8: { remoteRooms: ["W8N8"] } } });
 
@@ -116,7 +120,6 @@ describe("decideRemoteSpawn", () => {
 
     expect(decision?.role).toBe("reserver");
     expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W8N8" });
-    expect(Game.map.describeExits).not.toHaveBeenCalled();
   });
 
   it("does not spawn a second scout for a candidate that already has one en route", () => {
@@ -260,6 +263,32 @@ describe("decideRemoteSpawn", () => {
       },
       creeps: { r1: reserverCreep("W8N8") },
       rooms: { W8N8: remoteRoom1 }
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { remoteRooms: ["W8N8"] } } });
+
+    const decision = decideRemoteSpawn(mockRoom("W9N8"));
+
+    expect(decision?.role).toBe("scout");
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W9N7" });
+  });
+
+  // Regression coverage for the live bug this fix closes: reserverCount === 0 also
+  // happens to an *established* room whose reserver just died mid-contest, not only to a
+  // genuinely fresh room - and the bootstrap pre-empt can't tell the two apart. Found
+  // live: W57N24's sustained reservation fight against a rival kept its reserver count
+  // dipping to 0 often enough that the bootstrap pre-empt claimed the spawn slot before
+  // execution ever reached the round-robin fix from "Let scouting jump ahead of
+  // contested-remote restaffing" (4826095) - W59N25 stayed unscouted for 20,000+ ticks
+  // even after that fix shipped, because the contest never let it get that far.
+  it("spawns a scout ahead of the bootstrap pre-empt when an established room's reserver just died", () => {
+    vi.stubGlobal("Game", {
+      map: {
+        describeExits: vi.fn((roomName: string) =>
+          roomName === "W9N8" ? { "1": "W8N8", "3": "W9N7" } : {}
+        )
+      },
+      creeps: {},
+      rooms: {}
     });
     vi.stubGlobal("Memory", { rooms: { W9N8: { remoteRooms: ["W8N8"] } } });
 

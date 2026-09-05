@@ -265,18 +265,6 @@ export function decideRemoteSpawn(room: Room): SpawnDecision | null {
   const resolvedRooms = homeMemory.remoteRooms ?? [];
   const states = resolvedRooms.map((remoteRoomName) => buildRemoteRoomState(room, remoteRoomName));
 
-  // A freshly-resolved room with zero reservers hasn't been staffed at all yet - it
-  // jumps ahead of every other resolved room's routine restaffing, mirroring
-  // decideNextRemoteSpawn's own "no reserver yet" unconditional pre-empt within a single
-  // room. Without this, strict list order below would let room 1's endless one-off
-  // replacement spawns starve a from-scratch room 2 indefinitely, since room 1 will
-  // almost always have *some* affordable need on any given tick.
-  const unbootstrapped = states.find((state) => state.reserverCount === 0);
-  if (unbootstrapped) {
-    const decision = decideNextRemoteSpawn(unbootstrapped);
-    if (decision) return decision;
-  }
-
   // Short-circuit before touching Game.map or rescanning candidate memory at all once at
   // cap - this room will never need a new target again.
   const candidateMemories: Record<string, RoomMemory | undefined> = {};
@@ -288,17 +276,21 @@ export function decideRemoteSpawn(room: Room): SpawnDecision | null {
       candidateMemories[candidate] = Memory.rooms[candidate];
     }
 
-    // Scouting an unscouted candidate jumps ahead of routine restaffing of already-
-    // resolved rooms (the round-robin below) - a deliberate tradeoff, unlike the
-    // unbootstrapped pre-empt above. An ongoing contest over an existing remote (a rival
-    // out-reserving us, a repeatedly-destroyed container, etc.) can otherwise keep
-    // decideNextRemoteSpawn finding *something* to do on literally every tick, which
-    // starved scouting entirely - one candidate went 11,000+ ticks unscouted purely
-    // because the round-robin never ran dry. A scout is one MOVE part (50E) and
-    // self-limits to one at a time (decideScoutSpawn's liveScoutTargets check), so
-    // ceding a handful of remote-restaffing spawn slots to it is a bounded, cheap cost -
-    // see this function's own top comment for why that cost never reaches home-room
-    // economy or defense.
+    // Scouting an unscouted candidate jumps ahead of *every* resolved room's own
+    // restaffing - not just the round-robin below, but also the unbootstrapped pre-empt
+    // right after this block. Found live: W57N24 sits in a sustained reservation contest
+    // (rival out-reserving us via attackController, see reserver.ts), so its reserver
+    // dies and gets replaced often enough that reserverCount genuinely hits 0 on a
+    // recurring share of ticks - not just the one-off "freshly resolved" case the
+    // bootstrap pre-empt was written for. That pre-empt has no way to tell "never
+    // bootstrapped" apart from "established room, reserver just died again", so it kept
+    // re-claiming the slot on every such dip: W59N25 went 20,000+ ticks unscouted even
+    // after the round-robin fix below (4826095) shipped, because the contest never let
+    // reserverCount stay above 0 long enough for execution to ever reach that fix. A
+    // scout is one MOVE part (50E) and self-limits to one at a time (decideScoutSpawn's
+    // liveScoutTargets check), so ceding a handful of spawn slots to it - fresh room or
+    // not - is a bounded, cheap cost. See this function's own top comment for why that
+    // cost never reaches home-room economy or defense.
     const liveScoutTargets = new Set(
       Object.values(Game.creeps)
         .filter((creep) => creep.memory.role === "scout")
@@ -307,6 +299,18 @@ export function decideRemoteSpawn(room: Room): SpawnDecision | null {
     );
     const scoutDecision = decideScoutSpawn(room.name, candidates, candidateMemories, liveScoutTargets);
     if (scoutDecision) return scoutDecision;
+  }
+
+  // A freshly-resolved room with zero reservers hasn't been staffed at all yet - it
+  // jumps ahead of every other resolved room's routine restaffing, mirroring
+  // decideNextRemoteSpawn's own "no reserver yet" unconditional pre-empt within a single
+  // room. Without this, strict list order below would let room 1's endless one-off
+  // replacement spawns starve a from-scratch room 2 indefinitely, since room 1 will
+  // almost always have *some* affordable need on any given tick.
+  const unbootstrapped = states.find((state) => state.reserverCount === 0);
+  if (unbootstrapped) {
+    const decision = decideNextRemoteSpawn(unbootstrapped);
+    if (decision) return decision;
   }
 
   // Deliberate v1 simplification, not full round-robin fairness: room 1's outstanding
