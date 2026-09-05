@@ -211,6 +211,7 @@ function mockDeliveryCreep(
     structures?: { id: string; structureType: StructureConstant; freeCapacity: number }[];
     containers?: { id: string; pos: { x: number; y: number }; freeCapacity: number }[];
     controller?: { pos: { x: number; y: number }; my: boolean };
+    storage?: { freeCapacity: number };
     transferResult?: ScreepsReturnCode;
     carriedEnergy?: number;
   } = {}
@@ -232,12 +233,17 @@ function mockDeliveryCreep(
     store: { getFreeCapacity: () => c.freeCapacity }
   }));
 
+  const storage = overrides.storage
+    ? { id: "storage1", structureType: STRUCTURE_STORAGE, store: { getFreeCapacity: () => overrides.storage!.freeCapacity } }
+    : undefined;
+
   const controller = overrides.controller ?? { pos: { x: 25, y: 25 }, my: true };
 
   return {
     room: {
       name: "W1N1",
       controller,
+      storage,
       find: vi.fn((type: FindConstant) => {
         if (type === FIND_MY_STRUCTURES) return myTargets;
         if (type === FIND_STRUCTURES) return containerTargets;
@@ -453,6 +459,66 @@ describe("deliverEnergy", () => {
     const result = deliverEnergy(creep);
 
     expect(result.delivered).toBe(0);
+  });
+
+  // Storage is deliberately kept out of the closest-need-wins pool above (see that
+  // comment) rather than added to it - its effectively-unlimited free capacity would
+  // make it "closest" often enough to crowd out spawn/extension/tower, reproducing the
+  // exact starvation bug that pool was built to avoid, just one tier further along.
+  // Found live: source-side containers sat capped and spilling energy on the ground with
+  // Storage sitting at 0/1,000,000, because nothing ever delivered to it at all - haulers
+  // only ever drained containers into spawn/extension/tower/controller-container, which
+  // stop needing more long before a container backlog does.
+  it("delivers to storage as a last resort when nothing in the main pool needs energy", () => {
+    const creep = mockDeliveryCreep({
+      structures: [{ id: "spawn1", structureType: STRUCTURE_SPAWN, freeCapacity: 0 }],
+      storage: { freeCapacity: 500 }
+    });
+
+    const acted = deliverEnergy(creep);
+
+    expect(acted.attempted).toBe(true);
+    expect(creep.transfer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "storage1" }),
+      RESOURCE_ENERGY
+    );
+  });
+
+  it("prefers spawn/extension/tower/controller-container over storage even when storage has room", () => {
+    const creep = mockDeliveryCreep({
+      structures: [{ id: "spawn1", structureType: STRUCTURE_SPAWN, freeCapacity: 100 }],
+      storage: { freeCapacity: 500 }
+    });
+
+    deliverEnergy(creep);
+
+    expect(creep.transfer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "spawn1" }),
+      RESOURCE_ENERGY
+    );
+  });
+
+  it("excludes storage when it has no free capacity", () => {
+    const creep = mockDeliveryCreep({
+      structures: [{ id: "spawn1", structureType: STRUCTURE_SPAWN, freeCapacity: 0 }],
+      storage: { freeCapacity: 0 }
+    });
+
+    const acted = deliverEnergy(creep);
+
+    expect(acted.attempted).toBe(false);
+    expect(creep.transfer).not.toHaveBeenCalled();
+  });
+
+  it("still reports not attempted when the room has no storage", () => {
+    const creep = mockDeliveryCreep({
+      structures: [{ id: "spawn1", structureType: STRUCTURE_SPAWN, freeCapacity: 0 }]
+    });
+
+    const acted = deliverEnergy(creep);
+
+    expect(acted.attempted).toBe(false);
+    expect(creep.transfer).not.toHaveBeenCalled();
   });
 });
 

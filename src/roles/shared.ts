@@ -119,7 +119,18 @@ export function deliverEnergy(creep: Creep): DeliverEnergyResult {
     targets.push(controllerContainer);
   }
 
-  const target = creep.pos.findClosestByPath(targets);
+  // Storage is deliberately excluded from the pool above rather than added to it - its
+  // effectively-unlimited free capacity would make it "closest" often enough to crowd
+  // out spawn/extension/tower, reproducing the exact starvation this pool was built to
+  // avoid (see the pool comment), just one tier further along. It's only ever tried once
+  // nothing in that pool needs energy - an overflow valve, not a competing destination.
+  // Found live: source-side containers sat capped with Storage at 0/1,000,000, because
+  // nothing ever delivered to it at all.
+  const target: StructureSpawn | StructureExtension | StructureTower | StructureContainer | StructureStorage | null =
+    creep.pos.findClosestByPath(targets) ??
+    (creep.room.storage && creep.room.storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+      ? creep.room.storage
+      : null);
   if (!target) return { attempted: false, delivered: 0 };
 
   const result = creep.transfer(target, RESOURCE_ENERGY);
