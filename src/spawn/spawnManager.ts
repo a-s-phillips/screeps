@@ -1,5 +1,6 @@
 import { log } from "../logging/logger";
 import { isLocalHostileRecentlySeen } from "../planning/roomPlanner";
+import { getRemoteCandidates, MAX_REMOTE_ROOMS } from "../planning/remoteTargeting";
 import { chebyshevDistance } from "../utils/grid";
 import { getCachedFind } from "../utils/roomCache";
 import { bodyCost, planBody, planMinerBody } from "./bodyPlanner";
@@ -357,12 +358,24 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     const blockingRole = buildRoleTargets(state).find(
       ({ role, target }) => target - state.creepCounts[role] > 1
     )?.role;
+    const resolvedRooms = Memory.rooms[room.name]?.remoteRooms ?? [];
+    const liveScoutTargets = Object.values(Game.creeps)
+      .filter((creep) => creep.memory.role === "scout")
+      .map((creep) => creep.memory.remoteRoom);
+    const unscoutedCandidates =
+      !unmet && resolvedRooms.length < MAX_REMOTE_ROOMS
+        ? getRemoteCandidates(room.name)
+            .filter((candidate) => !resolvedRooms.includes(candidate))
+            .filter((candidate) => Memory.rooms[candidate]?.remoteIntel === undefined)
+        : undefined;
     log("remote_spawn_trace", {
       unmet,
       blockingReason: state.sourcesNeedingMiner.length > 0 ? "sourcesNeedingMiner" : blockingRole,
+      liveScoutTargets: unmet ? undefined : liveScoutTargets,
+      unscoutedCandidates,
       reserverCounts: unmet
         ? undefined
-        : (Memory.rooms[room.name]?.remoteRooms ?? []).map((remoteRoomName) => ({
+        : resolvedRooms.map((remoteRoomName) => ({
             room: remoteRoomName,
             reservers: Object.values(Game.creeps).filter(
               (creep) => creep.memory.role === "reserver" && creep.memory.remoteRoom === remoteRoomName

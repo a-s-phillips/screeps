@@ -683,6 +683,8 @@ describe("runSpawning", () => {
       expect(logger.log).toHaveBeenCalledWith("remote_spawn_trace", {
         unmet: false,
         blockingReason: undefined,
+        liveScoutTargets: [],
+        unscoutedCandidates: [],
         reserverCounts: [],
         decisionRole: null
       });
@@ -696,9 +698,38 @@ describe("runSpawning", () => {
       expect(logger.log).toHaveBeenCalledWith("remote_spawn_trace", {
         unmet: true,
         blockingReason: "harvester",
+        liveScoutTargets: undefined,
+        unscoutedCandidates: undefined,
         reserverCounts: undefined,
         decisionRole: null
       });
+    });
+
+    it("reports live scout targets and which resolved-candidate rooms still lack intel", () => {
+      vi.stubGlobal("Game", {
+        time: 12345,
+        map: { describeExits: vi.fn().mockReturnValue({ "1": "W2N2" }) },
+        rooms: {},
+        creeps: {
+          h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+          h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+          u1: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } },
+          u2: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } },
+          s1: { room: { name: "W3N3" }, memory: { role: "scout", remoteRoom: "W3N3" } }
+        }
+      });
+      vi.stubGlobal("Memory", { rooms: {} });
+      const spawn = mockSpawn(false);
+
+      runSpawning(spawn, mockRoom());
+
+      expect(logger.log).toHaveBeenCalledWith(
+        "remote_spawn_trace",
+        expect.objectContaining({
+          liveScoutTargets: ["W3N3"],
+          unscoutedCandidates: ["W2N2"]
+        })
+      );
     });
 
     it("includes each resolved remote room's live reserver count once local needs are met", () => {
