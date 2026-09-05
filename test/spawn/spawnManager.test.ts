@@ -662,6 +662,77 @@ describe("runSpawning", () => {
     expect(spawn.spawnCreep).not.toHaveBeenCalled();
   });
 
+  // Temporary diagnostic for the W59N25 scout-starvation investigation (see
+  // remote_spawn_trace in spawnManager.ts) - remove this describe block once resolved.
+  describe("remote_spawn_trace diagnostic", () => {
+    it("logs unmet:false and the final decision once local needs are met and remote spawning finds nothing to do", () => {
+      vi.stubGlobal("Game", {
+        time: 12345,
+        map: { describeExits: vi.fn().mockReturnValue({}) },
+        creeps: {
+          h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+          h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+          u1: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } },
+          u2: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } }
+        }
+      });
+      const spawn = mockSpawn(false);
+
+      runSpawning(spawn, mockRoom());
+
+      expect(logger.log).toHaveBeenCalledWith("remote_spawn_trace", {
+        unmet: false,
+        blockingReason: undefined,
+        reserverCounts: [],
+        decisionRole: null
+      });
+    });
+
+    it("logs unmet:true and which role's deficit blocked remote spawning", () => {
+      const spawn = mockSpawn(false);
+
+      runSpawning(spawn, mockRoom({ energyAvailable: 0 }));
+
+      expect(logger.log).toHaveBeenCalledWith("remote_spawn_trace", {
+        unmet: true,
+        blockingReason: "harvester",
+        reserverCounts: undefined,
+        decisionRole: null
+      });
+    });
+
+    it("includes each resolved remote room's live reserver count once local needs are met", () => {
+      vi.stubGlobal("Game", {
+        time: 12345,
+        map: { describeExits: vi.fn().mockReturnValue({}) },
+        rooms: {},
+        creeps: {
+          h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+          h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+          u1: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } },
+          u2: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } },
+          r1: {
+            room: { name: "W2N2" },
+            memory: { role: "reserver", remoteRoom: "W2N2" },
+            body: [{ type: CLAIM, hits: 100 }]
+          }
+        }
+      });
+      vi.stubGlobal("Memory", { rooms: { W1N1: { remoteRooms: ["W2N2"] } } });
+      const spawn = mockSpawn(false);
+
+      runSpawning(spawn, mockRoom());
+
+      expect(logger.log).toHaveBeenCalledWith(
+        "remote_spawn_trace",
+        expect.objectContaining({
+          unmet: false,
+          reserverCounts: [{ room: "W2N2", reservers: 1 }]
+        })
+      );
+    });
+  });
+
   it("spawns a keeperHarvester only once local needs are met and there's no remote-mining candidate to resolve", () => {
     vi.stubGlobal("Game", {
       time: 12345,
