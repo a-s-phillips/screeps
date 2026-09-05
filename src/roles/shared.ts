@@ -91,7 +91,18 @@ export function findControllerContainer(room: Room): StructureContainer | undefi
 // tanking upgrade throughput well below what the room's WORK parts should produce.
 // Closest-need-wins still keeps spawning covered in the common case, since extensions
 // cluster near the spawn.
-export function deliverEnergy(creep: Creep): boolean {
+export interface DeliverEnergyResult {
+  // Whether a delivery target was found and acted on at all (moving toward it counts) -
+  // callers that just want "did this creep have delivery work to do" (harvester, hauler)
+  // check this, same as the plain boolean this used to be.
+  attempted: boolean;
+  // Amount this tick's transfer will actually move once intents apply - 0 unless the
+  // transfer call itself returned OK, since anything else (most commonly
+  // ERR_NOT_IN_RANGE, still just closing distance) moves nothing.
+  delivered: number;
+}
+
+export function deliverEnergy(creep: Creep): DeliverEnergyResult {
   const myTargets = getCachedFind(creep.room, FIND_MY_STRUCTURES).filter(
     (structure): structure is StructureSpawn | StructureExtension | StructureTower =>
       (structure.structureType === STRUCTURE_SPAWN ||
@@ -109,12 +120,18 @@ export function deliverEnergy(creep: Creep): boolean {
   }
 
   const target = creep.pos.findClosestByPath(targets);
-  if (!target) return false;
+  if (!target) return { attempted: false, delivered: 0 };
 
-  if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+  const result = creep.transfer(target, RESOURCE_ENERGY);
+  if (result === ERR_NOT_IN_RANGE) {
     creep.moveTo(target, MOVE_OPTS);
   }
-  return true;
+
+  const delivered =
+    result === OK
+      ? Math.min(creep.store.getUsedCapacity(RESOURCE_ENERGY), target.store.getFreeCapacity(RESOURCE_ENERGY))
+      : 0;
+  return { attempted: true, delivered };
 }
 
 // Prefers whichever container has the biggest energy backlog over whichever is merely

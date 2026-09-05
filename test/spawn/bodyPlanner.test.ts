@@ -12,7 +12,7 @@ describe("planBody", () => {
     expect(planBody("upgrader", 199)).toEqual([]);
     expect(planBody("harvester", 299)).toEqual([]);
     expect(planBody("defender", 129)).toEqual([]);
-    expect(planBody("keeperHarvester", 299)).toEqual([]);
+    expect(planBody("keeperHarvester", 249)).toEqual([]);
   });
 
   it("returns exactly one base block when capacity matches its cost", () => {
@@ -22,12 +22,22 @@ describe("planBody", () => {
     expect(planBody("hauler", 100)).toEqual([CARRY, MOVE]);
     expect(planBody("remoteHauler", 100)).toEqual([CARRY, MOVE]);
     expect(planBody("defender", 130)).toEqual([ATTACK, MOVE]);
-    expect(planBody("keeperHarvester", 300)).toEqual([WORK, CARRY, CARRY, MOVE, MOVE]);
+    expect(planBody("keeperHarvester", 250)).toEqual([WORK, CARRY, MOVE, MOVE]);
   });
 
   it("repeats the block as many times as the capacity budget allows", () => {
     expect(planBody("upgrader", 450)).toEqual([WORK, CARRY, MOVE, WORK, CARRY, MOVE]);
     expect(planBody("defender", 260)).toEqual([ATTACK, MOVE, ATTACK, MOVE]);
+    expect(planBody("keeperHarvester", 500)).toEqual([
+      WORK,
+      CARRY,
+      MOVE,
+      MOVE,
+      WORK,
+      CARRY,
+      MOVE,
+      MOVE
+    ]);
   });
 
   it("never exceeds MAX_CREEP_SIZE parts or the capacity budget, even with unlimited capacity", () => {
@@ -63,6 +73,34 @@ describe("planBody", () => {
     const body = planBody("harvester", 900);
 
     expect(body).toEqual([WORK, WORK, CARRY, MOVE, WORK, WORK, CARRY, MOVE]);
+  });
+
+  // Roles that operate off-road (remote/cross-room trips, or SK avoidance mining)
+  // commit to full speed even fully loaded, unlike the three local roles (harvester,
+  // upgrader, builder), which deliberately accept a heavier ratio because roads
+  // eventually cover their route (see BASE_BLOCKS' own comments). This is exactly the
+  // property keeperHarvester silently violated until this test existed: CARRY only
+  // generates fatigue when it's actually carrying something, so a block that looks fine
+  // empty can still crawl at half speed loaded if MOVE doesn't also cover a full CARRY,
+  // not just WORK/ATTACK.
+  describe("full-speed-loaded roles stay full speed even fully loaded", () => {
+    const FULL_SPEED_LOADED_ROLES = [
+      "remoteHarvester",
+      "remoteHauler",
+      "hauler",
+      "defender",
+      "keeperHarvester"
+    ] as const;
+
+    it.each(FULL_SPEED_LOADED_ROLES)("%s's block covers every part's fatigue with MOVE", (role) => {
+      const body = planBody(role, 50_000);
+      const moveCount = body.filter((part) => part === MOVE).length;
+      // Every non-MOVE part generates fatigue on plain terrain while loaded - CARRY once
+      // full, WORK/ATTACK always - so the loaded case treats all of them as "heavy".
+      const heavyCount = body.length - moveCount;
+
+      expect(moveCount).toBeGreaterThanOrEqual(heavyCount);
+    });
   });
 });
 

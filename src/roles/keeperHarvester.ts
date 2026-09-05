@@ -1,3 +1,4 @@
+import { log } from "../logging/logger";
 import { KEEPER_RETREAT_LEAD_TICKS, KEEPER_RETREAT_RADIUS } from "../planning/keeperTargeting";
 import { chebyshevDistance } from "../utils/grid";
 import { getCachedFind } from "../utils/roomCache";
@@ -115,5 +116,11 @@ export function run(creep: Creep): void {
   const homeRoom = creep.memory.homeRoom;
   if (!homeRoom || !travelToRoom(creep, homeRoom)) return;
 
-  deliverEnergy(creep);
+  // The one signal neither prior "fixed and verified" round actually checked - both only
+  // confirmed a keeperHarvester could fill its cargo, never that it went on to complete
+  // the delivery leg. This closes that gap with a real, falsifiable telemetry event.
+  const { delivered } = deliverEnergy(creep);
+  if (delivered > 0) {
+    log("keeper_harvest_delivered", { name: creep.name, amount: delivered, homeRoom });
+  }
 }

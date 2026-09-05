@@ -25,7 +25,7 @@ export function run(creep: Creep): void {
 
   // deliverEnergy now includes the controller container in its own closest-need-wins
   // pool alongside spawn/extension/tower, so no separate fallback branch is needed here.
-  if (deliverEnergy(creep)) return;
+  if (deliverEnergy(creep).attempted) return;
 
   if (creep.room.controller) {
     if (creep.upgradeController(creep.room.controller) === ERR_NOT_IN_RANGE) {

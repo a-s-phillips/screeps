@@ -19,10 +19,16 @@ const BASE_BLOCKS: Record<BlockRole, BodyPartConstant[]> = {
   // 1:1 ATTACK/MOVE - a defender has no cargo to slow down for, so full speed always
   // matters, same reasoning as hauler/remoteHauler/remoteHarvester's own 1:1 ratios.
   defender: [ATTACK, MOVE],
-  // More CARRY-heavy than remoteHarvester's 1:1 - each safe-window trip into a Source
-  // Keeper room should carry as much as possible rather than optimizing pure harvest
-  // rate, and SK sources have a higher capacity (4000 vs. 3000) to support it.
-  keeperHarvester: [WORK, CARRY, CARRY, MOVE, MOVE]
+  // Same 1:1 ratio as remoteHarvester, not remoteHarvester's own block though - was
+  // originally [WORK, CARRY, CARRY, MOVE, MOVE] for extra capacity per safe-window trip,
+  // but that ratio is only 1:1 when *empty*: fully loaded, the 3 heavy parts (WORK +
+  // both CARRY) against only 2 MOVE computes out to exactly half speed on plain terrain
+  // (no road to a one-off SK room) at every body size - found by working through the
+  // fatigue math, not live, since nothing had measured or logged actual round-trip time
+  // before. The retreat leg out of a Source Keeper's leash range is exactly the leg that
+  // can't afford to be slow, so this trades the extra capacity back for guaranteed full
+  // speed loaded or not, same as every other cross-room role in this codebase.
+  keeperHarvester: [WORK, CARRY, MOVE, MOVE]
 };
 
 // A source regenerates SOURCE_ENERGY_CAPACITY every ENERGY_REGEN_TIME ticks; each WORK

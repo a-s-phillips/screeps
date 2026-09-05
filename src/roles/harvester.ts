@@ -23,7 +23,7 @@ export function run(creep: Creep): void {
     return;
   }
 
-  if (deliverEnergy(creep)) return;
+  if (deliverEnergy(creep).attempted) return;
 
   if (creep.room.controller) {
     if (creep.upgradeController(creep.room.controller) === ERR_NOT_IN_RANGE) {

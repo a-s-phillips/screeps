@@ -212,6 +212,7 @@ function mockDeliveryCreep(
     containers?: { id: string; pos: { x: number; y: number }; freeCapacity: number }[];
     controller?: { pos: { x: number; y: number }; my: boolean };
     transferResult?: ScreepsReturnCode;
+    carriedEnergy?: number;
   } = {}
 ) {
   const structures = overrides.structures ?? [
@@ -246,6 +247,9 @@ function mockDeliveryCreep(
     pos: {
       findClosestByPath: vi.fn((candidates: unknown[]) => candidates[0] ?? null)
     },
+    store: {
+      getUsedCapacity: vi.fn().mockReturnValue(overrides.carriedEnergy ?? 50)
+    },
     transfer: vi.fn().mockReturnValue(overrides.transferResult ?? OK),
     moveTo: vi.fn()
   } as unknown as Creep;
@@ -259,7 +263,7 @@ describe("deliverEnergy", () => {
 
     const acted = deliverEnergy(creep);
 
-    expect(acted).toBe(true);
+    expect(acted.attempted).toBe(true);
     expect(creep.transfer).toHaveBeenCalledWith(
       expect.objectContaining({ id: "spawn1" }),
       RESOURCE_ENERGY
@@ -297,7 +301,7 @@ describe("deliverEnergy", () => {
 
     const acted = deliverEnergy(creep);
 
-    expect(acted).toBe(false);
+    expect(acted.attempted).toBe(false);
     expect(creep.transfer).not.toHaveBeenCalled();
   });
 
@@ -311,7 +315,7 @@ describe("deliverEnergy", () => {
 
     const acted = deliverEnergy(creep);
 
-    expect(acted).toBe(true);
+    expect(acted.attempted).toBe(true);
     expect(creep.transfer).toHaveBeenCalledWith(
       expect.objectContaining({ id: "tower1" }),
       RESOURCE_ENERGY
@@ -328,7 +332,7 @@ describe("deliverEnergy", () => {
 
     const acted = deliverEnergy(creep);
 
-    expect(acted).toBe(true);
+    expect(acted.attempted).toBe(true);
     expect(creep.transfer).toHaveBeenCalledWith(
       expect.objectContaining({ id: "tower1" }),
       RESOURCE_ENERGY
@@ -342,7 +346,7 @@ describe("deliverEnergy", () => {
 
     const acted = deliverEnergy(creep);
 
-    expect(acted).toBe(false);
+    expect(acted.attempted).toBe(false);
     expect(creep.transfer).not.toHaveBeenCalled();
   });
 
@@ -360,7 +364,7 @@ describe("deliverEnergy", () => {
 
     const acted = deliverEnergy(creep);
 
-    expect(acted).toBe(true);
+    expect(acted.attempted).toBe(true);
     expect(creep.transfer).toHaveBeenCalledWith(
       expect.objectContaining({ id: "controllerContainer1" }),
       RESOURCE_ENERGY
@@ -376,7 +380,7 @@ describe("deliverEnergy", () => {
 
     const acted = deliverEnergy(creep);
 
-    expect(acted).toBe(false);
+    expect(acted.attempted).toBe(false);
     expect(creep.transfer).not.toHaveBeenCalled();
   });
 
@@ -389,7 +393,7 @@ describe("deliverEnergy", () => {
 
     const acted = deliverEnergy(creep);
 
-    expect(acted).toBe(false);
+    expect(acted.attempted).toBe(false);
     expect(creep.transfer).not.toHaveBeenCalled();
   });
 
@@ -402,8 +406,53 @@ describe("deliverEnergy", () => {
 
     const acted = deliverEnergy(creep);
 
-    expect(acted).toBe(false);
+    expect(acted.attempted).toBe(false);
     expect(creep.transfer).not.toHaveBeenCalled();
+  });
+
+  // Screeps intents don't apply until end-of-tick, so creep.store still reads the
+  // pre-transfer amount the instant transfer() is called - "delivered" has to be derived
+  // from what a successful (OK) transfer *will* move, not from re-reading store after the
+  // call, which would always see the stale, un-transferred amount.
+  it("reports the full carried amount as delivered when the target has enough room", () => {
+    const creep = mockDeliveryCreep({
+      structures: [{ id: "spawn1", structureType: STRUCTURE_SPAWN, freeCapacity: 100 }],
+      carriedEnergy: 50
+    });
+
+    const result = deliverEnergy(creep);
+
+    expect(result.delivered).toBe(50);
+  });
+
+  it("caps delivered at the target's free capacity when it's less than what's carried", () => {
+    const creep = mockDeliveryCreep({
+      structures: [{ id: "spawn1", structureType: STRUCTURE_SPAWN, freeCapacity: 20 }],
+      carriedEnergy: 50
+    });
+
+    const result = deliverEnergy(creep);
+
+    expect(result.delivered).toBe(20);
+  });
+
+  it("reports zero delivered when out of transfer range", () => {
+    const creep = mockDeliveryCreep({ transferResult: ERR_NOT_IN_RANGE, carriedEnergy: 50 });
+
+    const result = deliverEnergy(creep);
+
+    expect(result.delivered).toBe(0);
+  });
+
+  it("reports zero delivered when nothing needs energy", () => {
+    const creep = mockDeliveryCreep({
+      structures: [{ id: "spawn1", structureType: STRUCTURE_SPAWN, freeCapacity: 0 }],
+      carriedEnergy: 50
+    });
+
+    const result = deliverEnergy(creep);
+
+    expect(result.delivered).toBe(0);
   });
 });
 

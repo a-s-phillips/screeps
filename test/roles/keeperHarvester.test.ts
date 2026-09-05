@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as logger from "../../src/logging/logger";
 import { run } from "../../src/roles/keeperHarvester";
 import { MOVE_OPTS, REMOTE_MOVE_OPTS } from "../../src/roles/shared";
 import { resetRoomCache } from "../../src/utils/roomCache";
+
+vi.mock("../../src/logging/logger", () => ({ log: vi.fn() }));
 
 const spawn = { id: "spawn1", structureType: STRUCTURE_SPAWN };
 
@@ -16,6 +19,9 @@ function mockCreep(opts: {
   lairs?: { id: string; pos: { x: number; y: number }; ticksToSpawn?: number }[];
   hostiles?: { id: string; owner: { username: string }; pos: { x: number; y: number } }[];
   harvestResult?: ScreepsReturnCode;
+  transferResult?: ScreepsReturnCode;
+  spawnFreeCapacity?: number;
+  name?: string;
 }) {
   const sources = opts.sources ?? [];
   const lairs = (opts.lairs ?? []).map((l) => ({ ...l, structureType: STRUCTURE_KEEPER_LAIR }));
@@ -28,13 +34,14 @@ function mockCreep(opts: {
       if (type === FIND_HOSTILE_STRUCTURES) return lairs;
       if (type === FIND_HOSTILE_CREEPS) return hostiles;
       if (type === FIND_MY_STRUCTURES) {
-        return [{ ...spawn, store: { getFreeCapacity: () => 100 } }];
+        return [{ ...spawn, store: { getFreeCapacity: () => opts.spawnFreeCapacity ?? 100 } }];
       }
       return [];
     })
   };
 
   return {
+    name: opts.name ?? "keeperHarvester1",
     memory: {
       role: "keeperHarvester",
       working: opts.working,
@@ -52,7 +59,7 @@ function mockCreep(opts: {
       getFreeCapacity: vi.fn().mockReturnValue(opts.freeCapacity)
     },
     harvest: vi.fn().mockReturnValue(opts.harvestResult ?? OK),
-    transfer: vi.fn().mockReturnValue(OK),
+    transfer: vi.fn().mockReturnValue(opts.transferResult ?? OK),
     moveTo: vi.fn()
   } as unknown as Creep;
 }
@@ -416,5 +423,79 @@ describe("keeperHarvester role", () => {
       expect.objectContaining({ id: "spawn1" }),
       RESOURCE_ENERGY
     );
+  });
+
+  // The missing signal in both prior "fixed and verified" rounds - filling a
+  // keeperHarvester's cargo was confirmed live, but nothing ever confirmed the delivery
+  // leg actually completed. This event is that confirmation.
+  it("logs a keeper_harvest_delivered event with the delivered amount on a successful delivery", () => {
+    vi.mocked(logger.log).mockClear();
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 50,
+      freeCapacity: 0,
+      roomName: "W1N1",
+      homeRoom: "W1N1",
+      spawnFreeCapacity: 100,
+      name: "keeperHarvester_1"
+    });
+
+    run(creep);
+
+    expect(logger.log).toHaveBeenCalledWith("keeper_harvest_delivered", {
+      name: "keeperHarvester_1",
+      amount: 50,
+      homeRoom: "W1N1"
+    });
+  });
+
+  it("caps the logged amount at the target's free capacity", () => {
+    vi.mocked(logger.log).mockClear();
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 50,
+      freeCapacity: 0,
+      roomName: "W1N1",
+      homeRoom: "W1N1",
+      spawnFreeCapacity: 20
+    });
+
+    run(creep);
+
+    expect(logger.log).toHaveBeenCalledWith(
+      "keeper_harvest_delivered",
+      expect.objectContaining({ amount: 20 })
+    );
+  });
+
+  it("does not log a delivery event when out of transfer range", () => {
+    vi.mocked(logger.log).mockClear();
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 50,
+      freeCapacity: 0,
+      roomName: "W1N1",
+      homeRoom: "W1N1",
+      transferResult: ERR_NOT_IN_RANGE
+    });
+
+    run(creep);
+
+    expect(logger.log).not.toHaveBeenCalledWith("keeper_harvest_delivered", expect.anything());
+  });
+
+  it("does not log a delivery event while still traveling home", () => {
+    vi.mocked(logger.log).mockClear();
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 50,
+      freeCapacity: 0,
+      roomName: "W2N1",
+      homeRoom: "W1N1"
+    });
+
+    run(creep);
+
+    expect(logger.log).not.toHaveBeenCalledWith("keeper_harvest_delivered", expect.anything());
   });
 });
