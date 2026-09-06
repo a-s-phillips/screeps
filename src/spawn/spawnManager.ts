@@ -1,6 +1,5 @@
 import { log } from "../logging/logger";
 import { isLocalHostileRecentlySeen } from "../planning/roomPlanner";
-import { getRemoteCandidates, MAX_REMOTE_ROOMS } from "../planning/remoteTargeting";
 import { chebyshevDistance } from "../utils/grid";
 import { getCachedFind } from "../utils/roomCache";
 import { bodyCost, planBody, planMinerBody } from "./bodyPlanner";
@@ -344,47 +343,9 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     recycleSurplusHarvesters(spawn, harvesterCreeps, excessHarvesters);
   }
 
-  const localDecision = decideNextSpawn(state);
-  const unmet = hasUnmetLocalNeed(state);
-  const decision = localDecision ?? (unmet ? null : (decideRemoteSpawn(room) ?? decideKeeperSpawn(room)));
-
-  // Temporary diagnostic for the W59N25 scout-starvation investigation - remove once
-  // resolved. Only fires on the tick's "interesting" branch (local had nothing urgent
-  // enough to spawn this tick), to see how often hasUnmetLocalNeed blocks remote/scout
-  // entirely, which specific check trips it when it does, and - when it doesn't - what
-  // decideRemoteSpawn actually decided, correlated with each resolved remote room's live
-  // reserver count.
-  if (!localDecision) {
-    const blockingRole = buildRoleTargets(state).find(
-      ({ role, target }) => target - state.creepCounts[role] > 1
-    )?.role;
-    const resolvedRooms = Memory.rooms[room.name]?.remoteRooms ?? [];
-    const liveScoutTargets = Object.values(Game.creeps)
-      .filter((creep) => creep.memory.role === "scout")
-      .map((creep) => creep.memory.remoteRoom);
-    const unscoutedCandidates =
-      !unmet && resolvedRooms.length < MAX_REMOTE_ROOMS
-        ? getRemoteCandidates(room.name)
-            .filter((candidate) => !resolvedRooms.includes(candidate))
-            .filter((candidate) => Memory.rooms[candidate]?.remoteIntel === undefined)
-        : undefined;
-    log("remote_spawn_trace", {
-      unmet,
-      blockingReason: state.sourcesNeedingMiner.length > 0 ? "sourcesNeedingMiner" : blockingRole,
-      liveScoutTargets: unmet ? undefined : liveScoutTargets,
-      unscoutedCandidates,
-      reserverCounts: unmet
-        ? undefined
-        : resolvedRooms.map((remoteRoomName) => ({
-            room: remoteRoomName,
-            reservers: Object.values(Game.creeps).filter(
-              (creep) => creep.memory.role === "reserver" && creep.memory.remoteRoom === remoteRoomName
-            ).length
-          })),
-      decisionRole: decision?.role ?? null
-    });
-  }
-
+  const decision =
+    decideNextSpawn(state) ??
+    (hasUnmetLocalNeed(state) ? null : (decideRemoteSpawn(room) ?? decideKeeperSpawn(room)));
   if (!decision) return;
 
   const name = `${decision.role}_${Game.time}`;
