@@ -216,9 +216,19 @@ export function planRamparts(
 
   const spawn = getCachedFind(room, FIND_MY_SPAWNS)[0];
   const towers = myStructures.filter((structure) => structure.structureType === STRUCTURE_TOWER);
+  // Storage and links join the anchor list at RCL5+, once CONTROLLER_STRUCTURES.rampart
+  // rises past what spawn+towers alone can use (3 anchors: 1 spawn, 2 towers) - without
+  // this, the RCL5 4th slot (and RCL6/7's further increases) had no anchor left to place
+  // on at all, leaving allowed capacity permanently unused rather than merely unbuilt.
+  const storages = myStructures.filter(
+    (structure) => structure.structureType === STRUCTURE_STORAGE
+  );
+  const links = myStructures.filter((structure) => structure.structureType === STRUCTURE_LINK);
   const anchors: Point[] = [
     ...(spawn ? [{ x: spawn.pos.x, y: spawn.pos.y }] : []),
-    ...towers.map((tower) => ({ x: tower.pos.x, y: tower.pos.y }))
+    ...towers.map((tower) => ({ x: tower.pos.x, y: tower.pos.y })),
+    ...storages.map((storage) => ({ x: storage.pos.x, y: storage.pos.y })),
+    ...links.map((link) => ({ x: link.pos.x, y: link.pos.y }))
   ];
 
   for (const anchor of anchors) {

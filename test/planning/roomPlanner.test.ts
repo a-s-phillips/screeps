@@ -548,6 +548,45 @@ describe("planRoom", () => {
       expect(room.createConstructionSite).toHaveBeenCalledWith(30, 30, STRUCTURE_RAMPART);
     });
 
+    // Extension cap at RCL5 is 30 (test/setup.ts) - fill it so planExtensions reports done.
+    const extensionsAtCapRcl5 = Array.from({ length: 30 }, (_, i) => ({
+      x: i % 25,
+      y: Math.floor(i / 25) + 1
+    }));
+
+    it("places a rampart on storage once spawn and every tower are already ramparted", () => {
+      // Rampart's allowed count (2500 from RCL2 on, per CONTROLLER_STRUCTURES) is never
+      // the real limit in practice - the anchor list (spawn/towers/storage/links) is.
+      // Storage joins that list so it doesn't sit permanently unprotected once spawn
+      // and towers are covered.
+      const room = mockRoom({
+        level: 5,
+        existingExtensions: extensionsAtCapRcl5,
+        existingRamparts: [{ x: 25, y: 25 }, { x: 30, y: 30 }],
+        existingTowers: [{ x: 30, y: 30 }],
+        existingStorage: [{ x: 32, y: 32 }]
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(32, 32, STRUCTURE_RAMPART);
+    });
+
+    it("places a rampart on a link once spawn, towers, and storage are already ramparted", () => {
+      const room = mockRoom({
+        level: 5,
+        existingExtensions: extensionsAtCapRcl5,
+        existingRamparts: [{ x: 25, y: 25 }, { x: 30, y: 30 }, { x: 32, y: 32 }],
+        existingTowers: [{ x: 30, y: 30 }],
+        existingStorage: [{ x: 32, y: 32 }],
+        existingLinks: [{ x: 34, y: 34 }]
+      });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(34, 34, STRUCTURE_RAMPART);
+    });
+
     it("does not place a rampart on a spawn tile that already has one", () => {
       const room = mockRoom({
         level: 3,
