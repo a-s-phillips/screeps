@@ -157,10 +157,11 @@ describe("decideNextSpawn", () => {
     // wait for the ideal, capacity-sized body to become affordable instead of
     // shrinking.
     const state = baseState({
-      // upgrader held at 1-short-of-target (not severely under), so this test isolates
-      // harvester's own skip-not-downsize behavior without also exercising upgrader's -
-      // see the "sizes ... down when severely under target" tests for that.
-      creepCounts: { harvester: 1, upgrader: 1, builder: 0, hauler: 0, miner: 0 },
+      // upgrader held fully at target (unlike the other roles here, it no longer stays
+      // out of the way at merely one short - see feederSizingCapacity) so this test
+      // isolates harvester's own skip-not-downsize behavior without also exercising
+      // upgrader's - see the "sizes ... down when severely under target" tests for that.
+      creepCounts: { harvester: 1, upgrader: 2, builder: 0, hauler: 0, miner: 0 },
       energyAvailable: 300,
       energyCapacityAvailable: 800
     });
@@ -174,9 +175,10 @@ describe("decideNextSpawn", () => {
     // energy genuinely is flowing in, so it's fine to wait for the ideal,
     // capacity-sized body instead of shrinking.
     const state = baseState({
-      // upgrader held at 1-short-of-target (not severely under), so this test isolates
-      // hauler's own skip-not-downsize behavior without also exercising upgrader's.
-      creepCounts: { harvester: 0, upgrader: 1, builder: 0, hauler: 1, miner: 1 },
+      // upgrader held fully at target - it no longer stays out of the way at merely one
+      // short (see feederSizingCapacity) - so this test isolates hauler's own
+      // skip-not-downsize behavior without also exercising upgrader's.
+      creepCounts: { harvester: 0, upgrader: 2, builder: 0, hauler: 1, miner: 1 },
       sourcesWithoutContainerCount: 0,
       containerCount: 2,
       energyAvailable: 300,
@@ -229,9 +231,10 @@ describe("decideNextSpawn", () => {
 
   it("still waits for full capacity when only one short of the hauler target, with a working economy", () => {
     const state = baseState({
-      // upgrader held at 1-short-of-target (not severely under), so this test isolates
-      // hauler's own "one short still waits" behavior without also exercising upgrader's.
-      creepCounts: { harvester: 0, upgrader: 1, builder: 0, hauler: 4, miner: 1 },
+      // upgrader held fully at target - it no longer stays out of the way at merely one
+      // short (see feederSizingCapacity) - so this test isolates hauler's own "one short
+      // still waits" behavior without also exercising upgrader's.
+      creepCounts: { harvester: 0, upgrader: 2, builder: 0, hauler: 4, miner: 1 },
       sourcesWithoutContainerCount: 0,
       containerCount: 5,
       energyAvailable: 450,
@@ -263,7 +266,13 @@ describe("decideNextSpawn", () => {
     expect(decision?.body).toEqual([WORK, CARRY, MOVE]);
   });
 
-  it("still waits for full capacity when only one short of the upgrader target, with a working economy", () => {
+  it("sizes the upgrader body down to fit available energy when only one short of target, unlike other roles", () => {
+    // Unlike hauler/builder (see "still waits for full capacity when only one short of
+    // the hauler target" above), a full-capacity upgrader body costs the *entire*
+    // energyCapacityAvailable - waiting for that exact tick structurally never arrives
+    // once remote/keeper upkeep is consistently intercepting energy below it. Confirmed
+    // live: RCL5, 3 of 4 upgraders, plateaued for tens of thousands of ticks. Downsizing
+    // here instead trades body quality for actually resolving the deficit.
     const state = baseState({
       creepCounts: { harvester: 2, upgrader: 3, builder: 0, hauler: 0, miner: 0 },
       sourcesWithoutContainerCount: 0,
@@ -272,7 +281,10 @@ describe("decideNextSpawn", () => {
       energyCapacityAvailable: 800
     });
 
-    expect(decideNextSpawn(state)).toBeNull();
+    const decision = decideNextSpawn(state);
+
+    expect(decision?.role).toBe("upgrader");
+    expect(decision?.body).toEqual([WORK, CARRY, MOVE]);
   });
 
   it("sizes the harvester body down to fit available energy when nothing feeds the spawn yet", () => {

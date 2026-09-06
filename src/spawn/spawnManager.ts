@@ -70,13 +70,12 @@ function buildRoleTargets(state: RoomState): { role: BuildRole; target: number }
 // now" both make decideNextSpawn return null - conflating them would let remote spawning
 // spend energy the home room was just deemed too poor to spend on its own unmet need.
 //
-// A role only one creep short of target doesn't count as unmet, though - it's treated
-// the same as decideNextSpawn's own "close enough to wait for the ideal body" threshold
-// (feederSizingCapacity's severelyUnderTarget check). Found live: a room's upgrader
-// target (4) sat at 3 almost continuously, since each 4th upgrader needs a full-capacity
-// 1800-energy body that took ~120 ticks to reaccumulate every time one died and got
-// replaced - under a strict "any deficit blocks remote spawning" rule, remote expansion
-// got almost no opportunities to ever run.
+// A role only one creep short of target doesn't count as unmet, though - for hauler/
+// builder this is treated the same as decideNextSpawn's own "close enough to wait for
+// the ideal body" threshold (feederSizingCapacity's severelyUnderTarget check). Upgrader
+// no longer waits at deficit 1 (see feederSizingCapacity) but is still exempted here,
+// since this gate's job is purely "don't block remote/keeper spawning for a deficit this
+// small" and that's still true even now that upgrader resolves its own deficit faster.
 export function hasUnmetLocalNeed(state: RoomState): boolean {
   if (state.sourcesNeedingMiner.length > 0) return true;
   return buildRoleTargets(state).some(({ role, target }) => target - state.creepCounts[role] > 1);
@@ -166,7 +165,22 @@ export function decideNextSpawn(state: RoomState): SpawnDecision | null {
   // which starved not just upgraders but everything downstream of hasUnmetLocalNeed too
   // (remote and keeper spawning both gate on it), since the deficit could never resolve.
   function feederSizingCapacity(role: BuildRole, target: number): number {
-    const severelyUnderTarget = target - state.creepCounts[role] > 1;
+    const deficit = target - state.creepCounts[role];
+    // Upgrader is a special case, not just a lower threshold: a full-capacity upgrader
+    // body costs the *entire* energyCapacityAvailable (UPGRADER_TARGET_CAP's block is
+    // sized to consume it exactly), so "wait for full" on the last slot means waiting
+    // for a tick where nothing else spends first - remote/keeper upkeep intercepts
+    // energy before that ever happens once the economy is mature, leaving the deficit
+    // permanently unresolved rather than just slow to resolve (confirmed live: RCL5,
+    // 3 of 4 upgraders, plateaued for tens of thousands of ticks). Downsizing on any
+    // upgrader deficit, not just a severe one, fills the gap with whatever's on hand
+    // instead of waiting on a tick that structurally can't arrive.
+    //
+    // This is a candidate for the "doctrine" toggle described in secondbrain (see the
+    // 2026-09-06 note) - right now downsizing always wins, but a future "expansion"
+    // doctrine might want the cap reinstated so upgrader deficits leave more room for
+    // remote spawning again.
+    const severelyUnderTarget = role === "upgrader" ? deficit > 0 : deficit > 1;
     return hasWorkingEconomy && !severelyUnderTarget
       ? state.energyCapacityAvailable
       : Math.min(state.energyCapacityAvailable, state.energyAvailable);
