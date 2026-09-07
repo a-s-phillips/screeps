@@ -18,11 +18,14 @@ import { SpawnDecision } from "./spawnDecision";
 // container: ~58 tiles out at full speed empty, ~110 ticks back loaded and unroaded).
 export const REMOTE_HAULER_ROUND_TRIP_ESTIMATE = 170;
 
-// A reserver is never loaded (no cargo, just CLAIM+MOVE at a 1:1 ratio that keeps full
-// speed on plain/road terrain), so the outbound-empty half of the same live measurement
-// REMOTE_HAULER_ROUND_TRIP_ESTIMATE was derived from is the closest real data point
-// available - same "unverified guess, not measured for this specific trip" caveat.
-export const RESERVER_TRAVEL_ESTIMATE = 58;
+// NOT the hauler's empty-outbound-leg figure, despite both being "unloaded" - a hauler's
+// CARRY parts generate zero fatigue when empty, but a reserver's CLAIM part is heavy the
+// entire trip, both directions, so it doesn't get that break. A real fatigue-weighted
+// Dijkstra over this route's live terrain (8 swamp tiles out of 59) gives 91 ticks
+// one-way to W57N24's controller, not the 58 the hauler measurement would suggest -
+// confirmed live when this constant was first added undercounted by ~36%, which was
+// eating into the anticipatory-replacement lead time the pre-spawn fix depends on.
+export const RESERVER_TRAVEL_ESTIMATE = 91;
 
 // neededClaimParts (see decideNextRemoteSpawn) chases the rival's current CLAIM count
 // plus one, forever - an opponent that keeps growing turns reservation contests into an
@@ -245,7 +248,19 @@ function decideColonizerSpawn(state: RemoteRoomState): SpawnDecision | null {
     if (getCachedFind(remoteRoom, FIND_MY_SPAWNS).length > 0) return null;
   } else {
     const claimTarget = Memory.rooms[state.homeRoomName]?.claimTarget;
-    if (claimTarget !== state.remoteRoomName || !isClaimWindowApproaching()) return null;
+    const isPreClaimWindow = claimTarget === state.remoteRoomName && isClaimWindowApproaching();
+    // Also fires whenever the room has unbuilt sites sitting idle (e.g. a decayed
+    // container's replacement, or a manually-queued road), independent of claim timing -
+    // remoteHarvester's own container-building duty only runs while a remoteHarvester is
+    // actually alive, and it ages out once a source's container completes, so nothing
+    // re-triggers it if that container is later destroyed and sourcesWithoutContainerCount
+    // ticks back up to 1 - the round-robin further down *should* eventually catch it, but
+    // an active reservation contest can dominate every spawn cycle for a long stretch
+    // (see MAX_RESERVER_CLAIM_PARTS's own comment on why that's accepted, not prevented).
+    // A colonizer gives this a second, independent path to getting built.
+    const hasUnbuiltSites =
+      remoteRoom !== undefined && getCachedFind(remoteRoom, FIND_CONSTRUCTION_SITES).length > 0;
+    if (!isPreClaimWindow && !hasUnbuiltSites) return null;
   }
 
   if (countLiveColonizers(state.remoteRoomName) >= COLONIZER_TARGET) return null;

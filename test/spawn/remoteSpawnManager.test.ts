@@ -611,6 +611,15 @@ function mockClaimedRemoteRoom(opts: { name: string; hasSpawn?: boolean }) {
   };
 }
 
+function mockUnownedRemoteRoom(opts: { name: string; constructionSiteCount?: number }) {
+  const sites = Array.from({ length: opts.constructionSiteCount ?? 0 }, () => ({}));
+  return {
+    name: opts.name,
+    controller: { my: false },
+    find: vi.fn((type: FindConstant) => (type === FIND_CONSTRUCTION_SITES ? sites : []))
+  };
+}
+
 describe("decideNextRemoteSpawn > colonizer", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -740,6 +749,47 @@ describe("decideNextRemoteSpawn > colonizer", () => {
       }
     });
     vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W8N8" } } });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, sourcesWithoutContainerCount: 0 })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  it("dispatches a colonizer to an unowned remote room with unbuilt construction sites, independent of claim timing", () => {
+    // No claimTarget/GCL stubbing at all - this path fires purely because something is
+    // sitting unbuilt (e.g. a decayed container's replacement site), regardless of
+    // whether this room is even a claim target.
+    vi.stubGlobal("Game", {
+      rooms: { W8N8: mockUnownedRemoteRoom({ name: "W8N8", constructionSiteCount: 1 }) },
+      creeps: {}
+    });
+
+    const decision = decideNextRemoteSpawn(baseRemoteState({ reserverCount: 1 }));
+
+    expect(decision?.role).toBe("colonizer");
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W8N8" });
+  });
+
+  it("does not dispatch a colonizer to an unowned remote room with nothing unbuilt and no claim window approaching", () => {
+    vi.stubGlobal("Game", {
+      rooms: { W8N8: mockUnownedRemoteRoom({ name: "W8N8", constructionSiteCount: 0 }) },
+      creeps: {}
+    });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, sourcesWithoutContainerCount: 0 })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  it("does not dispatch a second colonizer to pick up unbuilt sites while one is already there", () => {
+    vi.stubGlobal("Game", {
+      rooms: { W8N8: mockUnownedRemoteRoom({ name: "W8N8", constructionSiteCount: 1 }) },
+      creeps: { colonizer_1: { memory: { role: "colonizer", remoteRoom: "W8N8" } } }
+    });
 
     const decision = decideNextRemoteSpawn(
       baseRemoteState({ reserverCount: 1, sourcesWithoutContainerCount: 0 })
@@ -946,7 +996,7 @@ describe("buildRemoteRoomState", () => {
   });
 
   it("stops counting a reserver toward reserverCount/ourReserverClaimParts once it's nearing death", () => {
-    // body.length 1 -> replacementLeadTime(1, RESERVER_TRAVEL_ESTIMATE) = 1*3 + 58 = 61.
+    // body.length 1 -> replacementLeadTime(1, RESERVER_TRAVEL_ESTIMATE) = 1*3 + 91 = 94.
     vi.stubGlobal("Game", {
       time: 1000,
       rooms: {},
