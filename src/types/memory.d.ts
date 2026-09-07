@@ -55,6 +55,12 @@ declare global {
     // container planned for it.
     keeperRoom?: string;
     keeperIntel?: KeeperIntel;
+    // Manually set, same convention as keeperRoom - a second-room claim is a deliberate
+    // one-off strategic choice, not something worth a whole candidate-picking pipeline
+    // for (no automated claim-target evaluation exists). When set to a room already in
+    // remoteRooms, that room's reserver claims it instead of reserving, once GCL allows -
+    // see reserver.ts.
+    claimTarget?: string;
   }
 }
 

@@ -7,13 +7,16 @@ function mockCreep(opts: {
   remoteRoom?: string;
   homeRoom?: string;
   hasController?: boolean;
+  controllerMy?: boolean;
   reservedBy?: string;
   reserveResult?: ScreepsReturnCode;
   attackResult?: ScreepsReturnCode;
+  claimResult?: ScreepsReturnCode;
 }) {
   const hasController = opts.hasController ?? true;
   const controller = {
     id: "controller1",
+    my: opts.controllerMy ?? false,
     reservation: opts.reservedBy !== undefined ? { username: opts.reservedBy } : undefined
   };
 
@@ -27,7 +30,8 @@ function mockCreep(opts: {
     room: { name: opts.roomName, controller: hasController ? controller : undefined },
     moveTo: vi.fn(),
     reserveController: vi.fn().mockReturnValue(opts.reserveResult ?? OK),
-    attackController: vi.fn().mockReturnValue(opts.attackResult ?? OK)
+    attackController: vi.fn().mockReturnValue(opts.attackResult ?? OK),
+    claimController: vi.fn().mockReturnValue(opts.claimResult ?? OK)
   } as unknown as Creep;
 }
 
@@ -133,5 +137,76 @@ describe("reserver role", () => {
     run(creep);
 
     expect(creep.moveTo).toHaveBeenCalledWith(creep.room.controller, MOVE_OPTS);
+  });
+
+  it("claims the controller instead of reserving once GCL allows another room and this is the designated claim target", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 2 },
+      rooms: { W1N1: { controller: { my: true } } }
+    });
+    vi.stubGlobal("Memory", { rooms: { W1N1: { claimTarget: "W2N1" } } });
+    const creep = mockCreep({ roomName: "W2N1", remoteRoom: "W2N1", homeRoom: "W1N1" });
+
+    run(creep);
+
+    expect(creep.claimController).toHaveBeenCalledWith(creep.room.controller);
+    expect(creep.reserveController).not.toHaveBeenCalled();
+    expect(creep.attackController).not.toHaveBeenCalled();
+  });
+
+  it("moves to the controller when out of range while claiming", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 2 },
+      rooms: { W1N1: { controller: { my: true } } }
+    });
+    vi.stubGlobal("Memory", { rooms: { W1N1: { claimTarget: "W2N1" } } });
+    const creep = mockCreep({
+      roomName: "W2N1",
+      remoteRoom: "W2N1",
+      homeRoom: "W1N1",
+      claimResult: ERR_NOT_IN_RANGE
+    });
+
+    run(creep);
+
+    expect(creep.moveTo).toHaveBeenCalledWith(creep.room.controller, MOVE_OPTS);
+  });
+
+  it("keeps reserving instead of claiming when GCL doesn't allow another room yet", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1 },
+      rooms: { W1N1: { controller: { my: true } } }
+    });
+    vi.stubGlobal("Memory", { rooms: { W1N1: { claimTarget: "W2N1" } } });
+    const creep = mockCreep({ roomName: "W2N1", remoteRoom: "W2N1", homeRoom: "W1N1" });
+
+    run(creep);
+
+    expect(creep.reserveController).toHaveBeenCalledWith(creep.room.controller);
+    expect(creep.claimController).not.toHaveBeenCalled();
+  });
+
+  it("keeps reserving when this remote room isn't the designated claim target", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 2 },
+      rooms: { W1N1: { controller: { my: true } } }
+    });
+    vi.stubGlobal("Memory", { rooms: { W1N1: { claimTarget: "W3N1" } } });
+    const creep = mockCreep({ roomName: "W2N1", remoteRoom: "W2N1", homeRoom: "W1N1" });
+
+    run(creep);
+
+    expect(creep.reserveController).toHaveBeenCalledWith(creep.room.controller);
+    expect(creep.claimController).not.toHaveBeenCalled();
+  });
+
+  it("does nothing once the room has already been claimed", () => {
+    const creep = mockCreep({ roomName: "W2N1", remoteRoom: "W2N1", controllerMy: true });
+
+    run(creep);
+
+    expect(creep.reserveController).not.toHaveBeenCalled();
+    expect(creep.attackController).not.toHaveBeenCalled();
+    expect(creep.claimController).not.toHaveBeenCalled();
   });
 });
