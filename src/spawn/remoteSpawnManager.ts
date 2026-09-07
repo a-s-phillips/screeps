@@ -1,5 +1,6 @@
 import {
   getRemoteCandidates,
+  isClaimWindowApproaching,
   isRoomHostile,
   isRoomOwnedByOther,
   MAX_REMOTE_ROOMS,
@@ -8,6 +9,7 @@ import {
 import { chebyshevDistance } from "../utils/grid";
 import { getCachedFind } from "../utils/roomCache";
 import { bodyCost, planBody, planMinerBody, planReserverBody, planScoutBody } from "./bodyPlanner";
+import { isNearingDeath, replacementLeadTime } from "./preSpawn";
 import { SpawnDecision } from "./spawnDecision";
 
 // Unverified guess pending a real measured round-trip time per remote room - same
@@ -15,6 +17,12 @@ import { SpawnDecision } from "./spawnDecision";
 // live measurement (W57N24, a fatigue-weighted shortest path from spawn to the remote
 // container: ~58 tiles out at full speed empty, ~110 ticks back loaded and unroaded).
 export const REMOTE_HAULER_ROUND_TRIP_ESTIMATE = 170;
+
+// A reserver is never loaded (no cargo, just CLAIM+MOVE at a 1:1 ratio that keeps full
+// speed on plain/road terrain), so the outbound-empty half of the same live measurement
+// REMOTE_HAULER_ROUND_TRIP_ESTIMATE was derived from is the closest real data point
+// available - same "unverified guess, not measured for this specific trip" caveat.
+export const RESERVER_TRAVEL_ESTIMATE = 58;
 
 // neededClaimParts (see decideNextRemoteSpawn) chases the rival's current CLAIM count
 // plus one, forever - an opponent that keeps growing turns reservation contests into an
@@ -164,8 +172,22 @@ export function buildRemoteRoomState(homeRoom: Room, remoteRoomName: string): Re
     const creep = Game.creeps[name];
     if (creep.memory.remoteRoom !== remoteRoomName) continue;
     if (creep.memory.role === "reserver") {
-      reserverCount++;
-      ourReserverClaimParts += countActiveClaimParts(creep.body);
+      // Unlike every local role (see spawnManager.ts's preSpawnLeadTimeByRole), remote
+      // roles had no anticipatory replacement at all - a reserver counted fully right up
+      // to the tick it died, so a replacement only started spawning (and then traveling)
+      // once a real gap had already opened, sometimes with reservation/vision already
+      // lapsed by the time it arrived. Treating a reserver as "already gone" once it's
+      // within its own replacement's spawn+travel time mirrors the local convention:
+      // decideNextRemoteSpawn sees the deficit and queues a replacement while the dying
+      // one is still there defending, so the two overlap instead of leaving a gap.
+      const nearingDeath = isNearingDeath(
+        creep.ticksToLive,
+        replacementLeadTime(creep.body.length, RESERVER_TRAVEL_ESTIMATE)
+      );
+      if (!nearingDeath) {
+        reserverCount++;
+        ourReserverClaimParts += countActiveClaimParts(creep.body);
+      }
     }
     if (creep.memory.role === "remoteHarvester") remoteHarvesterCount++;
     if (creep.memory.role === "remoteHauler") remoteHaulerCount++;
@@ -204,14 +226,28 @@ function countLiveColonizers(remoteRoomName: string): number {
   return count;
 }
 
-// Only fires once a remote room has actually been claimed (controller.my) - claiming
-// itself is reserver.ts's job (see RoomMemory.claimTarget), this just handles what
-// happens after: a claimed room has a controller but no spawn, and nothing else in the
-// codebase places or builds one on its own (see roomPlanner.ts's planSpawn).
+// Two triggers: once a remote room has actually been claimed (controller.my) - claiming
+// itself is reserver.ts's job (see RoomMemory.claimTarget) - this fires because a claimed
+// room has a controller but no spawn, and nothing else in the codebase places or builds
+// one on its own (see roomPlanner.ts's planSpawn). But waiting for that would mean the
+// colonizer only starts traveling *after* the claim lands, when reserver.ts claims the
+// same tick GCL allows it - all of the travel time would land inside the vulnerable
+// spawnless window instead of being absorbed ahead of it. So it also fires pre-claim,
+// once this room is the designated claim target and isClaimWindowApproaching() says GCL
+// is close enough that it's worth a creep getting into position now - by the time the
+// claim actually lands, it's already there, fed, and ready to build the instant
+// planSpawn places a site.
 function decideColonizerSpawn(state: RemoteRoomState): SpawnDecision | null {
   const remoteRoom = Game.rooms[state.remoteRoomName];
-  if (!remoteRoom?.controller?.my) return null;
-  if (getCachedFind(remoteRoom, FIND_MY_SPAWNS).length > 0) return null;
+  const isOwned = remoteRoom?.controller?.my ?? false;
+
+  if (isOwned) {
+    if (getCachedFind(remoteRoom, FIND_MY_SPAWNS).length > 0) return null;
+  } else {
+    const claimTarget = Memory.rooms[state.homeRoomName]?.claimTarget;
+    if (claimTarget !== state.remoteRoomName || !isClaimWindowApproaching()) return null;
+  }
+
   if (countLiveColonizers(state.remoteRoomName) >= COLONIZER_TARGET) return null;
 
   const body = planBody("colonizer", state.energyCapacityAvailable);
@@ -219,6 +255,50 @@ function decideColonizerSpawn(state: RemoteRoomState): SpawnDecision | null {
 
   return {
     role: "colonizer",
+    body,
+    memory: { homeRoom: state.homeRoomName, remoteRoom: state.remoteRoomName }
+  };
+}
+
+// One defender is plenty against ender2012's historically unarmed CLAIM+MOVE presence -
+// defender.ts's plain "attack nearest hostile" doesn't need CLAIM-part scaling the way
+// reserver does, just a body capable of killing a bare CLAIM+MOVE creep (200 HP, no
+// defense of its own).
+const REMOTE_DEFENDER_TARGET = 1;
+
+function countLiveRemoteDefenders(remoteRoomName: string): number {
+  let count = 0;
+  for (const name in Game.creeps) {
+    const creep = Game.creeps[name];
+    if (creep.memory.remoteRoom === remoteRoomName && creep.memory.role === "defender") count++;
+  }
+  return count;
+}
+
+// Once owned, maintained unconditionally (no isClaimWindowApproaching or spawn-exists
+// off-switch the way decideColonizerSpawn's post-claim branch has) - the goal is
+// sustained control over "a large sustained period of ticks", not just surviving the
+// moment of claiming. Deliberately NOT keyed on isClaimWindowApproaching once owned:
+// that function measures GCL readiness for the *next* room, which naturally goes false
+// again shortly after this one is claimed (ownedRoomCount catches up to gcl.level, and
+// progress resets toward a much larger next threshold) - reusing it here would silently
+// stand the defender down right after a successful claim, the opposite of the goal.
+// Pre-claim, still gated on isClaimWindowApproaching so it doesn't fire on a whim long
+// before GCL is anywhere close (a bit early is cheap - an idle creep - but not free).
+function decideRemoteDefenderSpawn(state: RemoteRoomState): SpawnDecision | null {
+  const claimTarget = Memory.rooms[state.homeRoomName]?.claimTarget;
+  if (claimTarget !== state.remoteRoomName) return null;
+
+  const isOwned = Game.rooms[state.remoteRoomName]?.controller?.my ?? false;
+  if (!isOwned && !isClaimWindowApproaching()) return null;
+
+  if (countLiveRemoteDefenders(state.remoteRoomName) >= REMOTE_DEFENDER_TARGET) return null;
+
+  const body = planBody("defender", state.energyCapacityAvailable);
+  if (body.length === 0 || bodyCost(body) > state.energyAvailable) return null;
+
+  return {
+    role: "defender",
     body,
     memory: { homeRoom: state.homeRoomName, remoteRoom: state.remoteRoomName }
   };
@@ -235,7 +315,18 @@ function decideColonizerSpawn(state: RemoteRoomState): SpawnDecision | null {
 // hostileRecentlySeen only pauses *new* spawns (see roles/shared.ts's
 // retreatFromHostileRemote for what happens to creeps already assigned).
 export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | null {
-  if (state.hostileRecentlySeen || state.ownedByOther) return null;
+  if (state.ownedByOther) return null;
+
+  // Checked ahead of the hostileRecentlySeen gate below, deliberately: every other
+  // remote spawn decision pauses when a hostile's been seen recently (an unarmed economy
+  // creep walking into danger is a straightforward loss - see roles/shared.ts's
+  // retreatFromHostileRemote), but a defender's whole purpose is to walk into that same
+  // danger and fight it. Gating it behind "no hostile recently seen" would block it
+  // exactly when it's most needed.
+  const defenderDecision = decideRemoteDefenderSpawn(state);
+  if (defenderDecision) return defenderDecision;
+
+  if (state.hostileRecentlySeen) return null;
 
   // "Enough reserver" isn't a headcount, it's a CLAIM-part tally: attackController and
   // reserveController both move a controller's reservation endTime by 1 tick per CLAIM

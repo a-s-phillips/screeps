@@ -4,7 +4,7 @@ import { MOVE_OPTS, REMOTE_MOVE_OPTS } from "../../src/roles/shared";
 import { resetRoomCache } from "../../src/utils/roomCache";
 
 const source = { id: "source1", pos: { x: 20, y: 20 } };
-const controller = { id: "controller1" };
+const controller = { id: "controller1", my: true };
 const spawnSite = { id: "site1", structureType: STRUCTURE_SPAWN };
 
 function mockCreep(opts: {
@@ -20,6 +20,7 @@ function mockCreep(opts: {
   buildResult?: ScreepsReturnCode;
   upgradeResult?: ScreepsReturnCode;
   hasController?: boolean;
+  controllerMy?: boolean;
 }) {
   const sites = opts.sites ?? [spawnSite];
   const containers = opts.containers ?? [];
@@ -28,7 +29,7 @@ function mockCreep(opts: {
 
   const room = {
     name: opts.roomName,
-    controller: hasController ? controller : undefined,
+    controller: hasController ? { ...controller, my: opts.controllerMy ?? true } : undefined,
     find: vi.fn((type: FindConstant) => {
       if (type === FIND_SOURCES_ACTIVE) return sources;
       if (type === FIND_CONSTRUCTION_SITES) return sites;
@@ -234,6 +235,28 @@ describe("colonizer role", () => {
 
     expect(creep.build).not.toHaveBeenCalled();
     expect(creep.upgradeController).toHaveBeenCalledWith(controller);
+  });
+
+  it("idles once full when pre-positioned ahead of a claim that hasn't landed yet", () => {
+    // A colonizer can be dispatched before the room is actually ours (see
+    // remoteSpawnManager.ts's decideColonizerSpawn pre-claim branch) - there's no site to
+    // build yet (planSpawn only runs once owned) and upgradeController would error on a
+    // controller we don't own, so it should just wait.
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 50,
+      freeCapacity: 0,
+      roomName: "W2N1",
+      remoteRoom: "W2N1",
+      sites: [],
+      controllerMy: false
+    });
+
+    run(creep);
+
+    expect(creep.build).not.toHaveBeenCalled();
+    expect(creep.upgradeController).not.toHaveBeenCalled();
+    expect(creep.moveTo).not.toHaveBeenCalled();
   });
 
   it("does nothing once full if there are no sites and unexpectedly no controller", () => {

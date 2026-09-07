@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CLAIM_WINDOW_GCL_MARGIN,
   getMyUsername,
   getRemoteCandidates,
+  hasGclHeadroomForAnotherRoom,
+  isClaimWindowApproaching,
   isRoomHostile,
   isRoomOwnedByOther,
   MAX_REMOTE_ROOMS,
@@ -448,6 +451,76 @@ describe("getMyUsername", () => {
     vi.stubGlobal("Game", { spawns: {} });
 
     expect(getMyUsername()).toBeUndefined();
+  });
+});
+
+describe("hasGclHeadroomForAnotherRoom", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("is true when GCL level exceeds the number of owned rooms", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 2 },
+      rooms: { W1N1: { controller: { my: true } } }
+    });
+
+    expect(hasGclHeadroomForAnotherRoom()).toBe(true);
+  });
+
+  it("is false when GCL level already matches the number of owned rooms", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1 },
+      rooms: { W1N1: { controller: { my: true } } }
+    });
+
+    expect(hasGclHeadroomForAnotherRoom()).toBe(false);
+  });
+
+  it("does not count a visible-but-unowned room toward the owned count", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1 },
+      rooms: { W1N1: { controller: { my: false } }, W2N1: { controller: { my: true } } }
+    });
+
+    expect(hasGclHeadroomForAnotherRoom()).toBe(false);
+  });
+});
+
+describe("isClaimWindowApproaching", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("is true once GCL headroom already exists, regardless of progress", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 2, progress: 0, progressTotal: 1000000 },
+      rooms: { W1N1: { controller: { my: true } } }
+    });
+
+    expect(isClaimWindowApproaching()).toBe(true);
+  });
+
+  it("is true once remaining progress is within the margin", () => {
+    vi.stubGlobal("Game", {
+      gcl: {
+        level: 1,
+        progress: 1000000 - CLAIM_WINDOW_GCL_MARGIN,
+        progressTotal: 1000000
+      },
+      rooms: { W1N1: { controller: { my: true } } }
+    });
+
+    expect(isClaimWindowApproaching()).toBe(true);
+  });
+
+  it("is false while remaining progress is outside the margin and GCL isn't ready", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1, progress: 0, progressTotal: 1000000 },
+      rooms: { W1N1: { controller: { my: true } } }
+    });
+
+    expect(isClaimWindowApproaching()).toBe(false);
   });
 });
 

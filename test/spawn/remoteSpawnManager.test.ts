@@ -19,11 +19,14 @@ beforeEach(() => {
 
 // buildRemoteRoomState now counts active CLAIM parts on our own Game.creeps reservers
 // (not just headcount), so mock reservers need a real body - defaults to 1 CLAIM part,
-// matching the fixed body every reserver had before that counting existed.
-function reserverCreep(remoteRoom: string, claimParts = 1) {
+// matching the fixed body every reserver had before that counting existed. ticksToLive
+// defaults to undefined (still spawning / not read), which isNearingDeath treats as
+// healthy - tests exercising the anticipatory-replacement behavior pass it explicitly.
+function reserverCreep(remoteRoom: string, claimParts = 1, ticksToLive?: number) {
   return {
     memory: { role: "reserver", remoteRoom },
-    body: Array.from({ length: claimParts }, () => ({ type: CLAIM, hits: 100 }))
+    body: Array.from({ length: claimParts }, () => ({ type: CLAIM, hits: 100 })),
+    ticksToLive
   };
 }
 
@@ -675,6 +678,202 @@ describe("decideNextRemoteSpawn > colonizer", () => {
 
     expect(decision).toBeNull();
   });
+
+  it("pre-positions a colonizer ahead of the claim once the claim window is approaching", () => {
+    // Game.rooms includes our own home room as owned (my: true) - matches production
+    // truth, and matters here: without it, ownedRoomCount would read as 0, making
+    // hasGclHeadroomForAnotherRoom's own "level > owned count" already-true short-circuit
+    // fire regardless of progress, which would pass this test for the wrong reason. A
+    // defender is already live too - decideRemoteDefenderSpawn now outranks colonizer
+    // (see the "decideNextRemoteSpawn > remote defender" tests below), so without one
+    // already present this scenario would dispatch a defender first, not a colonizer.
+    vi.stubGlobal("Game", {
+      gcl: { level: 1, progress: 999999, progressTotal: 1000000 },
+      rooms: { W9N8: { controller: { my: true } } },
+      creeps: { defender_1: { memory: { role: "defender", remoteRoom: "W8N8" } } }
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W8N8" } } });
+
+    const decision = decideNextRemoteSpawn(baseRemoteState({ reserverCount: 1 }));
+
+    expect(decision?.role).toBe("colonizer");
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W8N8" });
+  });
+
+  it("does not pre-position a colonizer when this room isn't the designated claim target", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1, progress: 999999, progressTotal: 1000000 },
+      rooms: { W9N8: { controller: { my: true } } },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W7N7" } } });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, sourcesWithoutContainerCount: 0 })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  it("does not pre-position a colonizer while the claim window is still far off", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1, progress: 0, progressTotal: 1000000 },
+      rooms: { W9N8: { controller: { my: true } } },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W8N8" } } });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, sourcesWithoutContainerCount: 0 })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  it("does not pre-position a second colonizer while one is already en route", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1, progress: 999999, progressTotal: 1000000 },
+      rooms: { W9N8: { controller: { my: true } } },
+      creeps: {
+        colonizer_1: { memory: { role: "colonizer", remoteRoom: "W8N8" } },
+        defender_1: { memory: { role: "defender", remoteRoom: "W8N8" } }
+      }
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W8N8" } } });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, sourcesWithoutContainerCount: 0 })
+    );
+
+    expect(decision).toBeNull();
+  });
+});
+
+describe("decideNextRemoteSpawn > remote defender", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("dispatches a defender once the claim window is approaching for the designated target", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1, progress: 999999, progressTotal: 1000000 },
+      rooms: { W9N8: { controller: { my: true } } },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W8N8" } } });
+
+    const decision = decideNextRemoteSpawn(baseRemoteState({ reserverCount: 1 }));
+
+    expect(decision?.role).toBe("defender");
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W8N8" });
+  });
+
+  it("outranks a hostile-recently-seen pause - a defender's job is to walk into that danger", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1, progress: 999999, progressTotal: 1000000 },
+      rooms: { W9N8: { controller: { my: true } } },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W8N8" } } });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, hostileRecentlySeen: true })
+    );
+
+    expect(decision?.role).toBe("defender");
+  });
+
+  it("outranks the colonizer", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1, progress: 999999, progressTotal: 1000000 },
+      rooms: { W9N8: { controller: { my: true } } },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W8N8" } } });
+
+    const decision = decideNextRemoteSpawn(baseRemoteState({ reserverCount: 1 }));
+
+    expect(decision?.role).toBe("defender");
+  });
+
+  it("does not dispatch when this room isn't the designated claim target", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1, progress: 999999, progressTotal: 1000000 },
+      rooms: { W9N8: { controller: { my: true } } },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W7N7" } } });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, sourcesWithoutContainerCount: 0 })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  it("does not dispatch while the claim window is still far off", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1, progress: 0, progressTotal: 1000000 },
+      rooms: { W9N8: { controller: { my: true } } },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W8N8" } } });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, sourcesWithoutContainerCount: 0 })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  it("does not dispatch a second defender while one is already live", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1, progress: 999999, progressTotal: 1000000 },
+      rooms: { W9N8: { controller: { my: true } } },
+      creeps: {
+        defender_1: { memory: { role: "defender", remoteRoom: "W8N8" } },
+        colonizer_1: { memory: { role: "colonizer", remoteRoom: "W8N8" } }
+      }
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W8N8" } } });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, sourcesWithoutContainerCount: 0 })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  it("keeps maintaining a defender even after the room is successfully claimed", () => {
+    // Not gated on ownership the way colonizer's post-claim branch is - sustained
+    // control is the whole point, so it shouldn't stand down just because the claim
+    // already succeeded.
+    vi.stubGlobal("Game", {
+      gcl: { level: 2, progress: 0, progressTotal: 5000000 },
+      rooms: { W9N8: { controller: { my: true } }, W8N8: { controller: { my: true } } },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W8N8" } } });
+
+    const decision = decideNextRemoteSpawn(baseRemoteState({ reserverCount: 1 }));
+
+    expect(decision?.role).toBe("defender");
+  });
+
+  it("returns null when a defender body is unaffordable and there's no other work", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1, progress: 999999, progressTotal: 1000000 },
+      rooms: { W9N8: { controller: { my: true } } },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W8N8" } } });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, energyAvailable: 0, energyCapacityAvailable: 0 })
+    );
+
+    expect(decision).toBeNull();
+  });
 });
 
 function mockVisibleRemoteRoom(opts: {
@@ -744,6 +943,52 @@ describe("buildRemoteRoomState", () => {
     const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
 
     expect(state.ourReserverClaimParts).toBe(3);
+  });
+
+  it("stops counting a reserver toward reserverCount/ourReserverClaimParts once it's nearing death", () => {
+    // body.length 1 -> replacementLeadTime(1, RESERVER_TRAVEL_ESTIMATE) = 1*3 + 58 = 61.
+    vi.stubGlobal("Game", {
+      time: 1000,
+      rooms: {},
+      creeps: { r1: reserverCreep("W8N8", 1, 50) }
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.reserverCount).toBe(0);
+    expect(state.ourReserverClaimParts).toBe(0);
+  });
+
+  it("still counts a reserver with plenty of ticksToLive left before its lead time", () => {
+    vi.stubGlobal("Game", {
+      time: 1000,
+      rooms: {},
+      creeps: { r1: reserverCreep("W8N8", 1, 200) }
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.reserverCount).toBe(1);
+    expect(state.ourReserverClaimParts).toBe(1);
+  });
+
+  it("counts only the healthy reserver when a dying one and its replacement overlap", () => {
+    vi.stubGlobal("Game", {
+      time: 1000,
+      rooms: {},
+      creeps: {
+        dying: reserverCreep("W8N8", 2, 50),
+        fresh: reserverCreep("W8N8", 1, undefined)
+      }
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.reserverCount).toBe(1);
+    expect(state.ourReserverClaimParts).toBe(1);
   });
 
   it("sums active CLAIM parts across hostile creeps currently visible in the remote room", () => {

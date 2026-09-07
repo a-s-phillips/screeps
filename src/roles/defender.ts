@@ -1,10 +1,17 @@
 import { getCachedFind } from "../utils/roomCache";
-import { MOVE_OPTS } from "./shared";
+import { MOVE_OPTS, travelToRoom } from "./shared";
 
-// Home-room-only: no cross-room travel logic at all. Remote-mining creeps get
-// recall-only (see retreatFromHostileRemote in shared.ts) - a defender never leaves
-// its home room to fight, and never will under this design.
+// Deliberately reverses an earlier "never leaves its home room to fight" design -
+// protecting a claim in progress (see remoteSpawnManager.ts's decideRemoteDefenderSpawn)
+// needs a creep willing to actually engage a rival's CLAIM-carrying creep, not retreat
+// from it the way every other remote role does (see shared.ts's
+// retreatFromHostileRemote, deliberately not used here). A local defender (no
+// memory.remoteRoom) behaves exactly as before - this only adds a travel leg when one is
+// assigned.
 export function run(creep: Creep): void {
+  const remoteRoom = creep.memory.remoteRoom;
+  if (remoteRoom && !travelToRoom(creep, remoteRoom)) return;
+
   const hostiles = getCachedFind(creep.room, FIND_HOSTILE_CREEPS);
   const target = creep.pos.findClosestByRange(hostiles);
 

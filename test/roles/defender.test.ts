@@ -1,15 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { run } from "../../src/roles/defender";
-import { MOVE_OPTS } from "../../src/roles/shared";
+import { MOVE_OPTS, REMOTE_MOVE_OPTS } from "../../src/roles/shared";
 import { resetRoomCache } from "../../src/utils/roomCache";
 
 const spawn = { id: "spawn1", structureType: STRUCTURE_SPAWN };
 
-function mockCreep(opts: { hostiles?: { id: string }[]; attackResult?: ScreepsReturnCode }) {
+function mockCreep(opts: {
+  hostiles?: { id: string }[];
+  attackResult?: ScreepsReturnCode;
+  roomName?: string;
+  remoteRoom?: string;
+}) {
   const hostiles = opts.hostiles ?? [];
+  const roomName = opts.roomName ?? "W1N1";
 
   const room = {
-    name: "W1N1",
+    name: roomName,
     find: vi.fn((type: FindConstant) => {
       if (type === FIND_HOSTILE_CREEPS) return hostiles;
       if (type === FIND_MY_SPAWNS) return [spawn];
@@ -18,6 +24,7 @@ function mockCreep(opts: { hostiles?: { id: string }[]; attackResult?: ScreepsRe
   };
 
   return {
+    memory: { role: "defender", remoteRoom: opts.remoteRoom },
     room,
     pos: {
       findClosestByRange: vi.fn((targets: unknown[]) => targets[0] ?? null)
@@ -70,5 +77,26 @@ describe("defender run", () => {
     run(creep);
 
     expect(creep.moveTo).not.toHaveBeenCalled();
+  });
+
+  it("travels to the remote room before fighting, instead of retreating from a hostile there", () => {
+    const creep = mockCreep({ roomName: "W1N1", remoteRoom: "W2N1" });
+
+    run(creep);
+
+    expect(creep.moveTo).toHaveBeenCalledWith(
+      expect.objectContaining({ roomName: "W2N1" }),
+      REMOTE_MOVE_OPTS
+    );
+    expect(creep.attack).not.toHaveBeenCalled();
+  });
+
+  it("attacks a hostile once it has arrived at the remote room", () => {
+    const hostile = { id: "hostile1" };
+    const creep = mockCreep({ roomName: "W2N1", remoteRoom: "W2N1", hostiles: [hostile] });
+
+    run(creep);
+
+    expect(creep.attack).toHaveBeenCalledWith(hostile);
   });
 });

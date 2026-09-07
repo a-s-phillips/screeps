@@ -136,6 +136,33 @@ export function getMyUsername(): string | undefined {
   return Object.values(Game.spawns)[0]?.owner.username;
 }
 
+// Mirrors claimController's own precondition (GCL must allow one more owned room than we
+// currently have). Single source of truth so reserver.ts (deciding whether to actually
+// claim) and remoteSpawnManager.ts (deciding whether to start pre-positioning a colonizer
+// or defender ahead of that) can't drift apart on what "ready" means.
+export function hasGclHeadroomForAnotherRoom(): boolean {
+  const ownedRoomCount = Object.values(Game.rooms).filter((room) => room.controller?.my).length;
+  return Game.gcl.level > ownedRoomCount;
+}
+
+// No measured GCL point-gain rate exists yet (unlike REMOTE_HAULER_ROUND_TRIP_ESTIMATE,
+// which came from a real timed measurement) - this is a deliberately generous,
+// documented-as-approximate margin rather than false precision. GCL points accrue at
+// roughly the same pace as controller upgrade progress (observed ~5/tick on W57N25 at
+// RCL5), so even a wide margin here still resolves to far more lead time than a
+// colonizer/defender's cross-room travel (tens of ticks) needs - dispatching "too early"
+// just means a creep idles for a while, not a wasted spawn or a missed window.
+export const CLAIM_WINDOW_GCL_MARGIN = 20000;
+
+// True once it's worth pre-positioning a colonizer/defender at a claim target ahead of
+// the claim itself actually landing - see hasGclHeadroomForAnotherRoom's own comment for
+// why "already ready" also counts (reserver.ts claims the same tick that flips true, so a
+// creep that only started traveling then would arrive too late to have been "pre"-anything).
+export function isClaimWindowApproaching(): boolean {
+  if (hasGclHeadroomForAnotherRoom()) return true;
+  return Game.gcl.progressTotal - Game.gcl.progress <= CLAIM_WINDOW_GCL_MARGIN;
+}
+
 // Overwritten every tick while visible, so it can't go stale while a scout/reserver/
 // remoteHarvester is present - called for every room the bot currently has vision into,
 // not just chosen remote targets, so intel is ready the moment a candidate is scouted.

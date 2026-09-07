@@ -1,17 +1,5 @@
-import { getMyUsername } from "../planning/remoteTargeting";
+import { getMyUsername, hasGclHeadroomForAnotherRoom } from "../planning/remoteTargeting";
 import { MOVE_OPTS, retreatFromHostileRemote, travelToRoom } from "./shared";
-
-// Mirrors claimController's own precondition (GCL must allow one more owned room than we
-// currently have) - checked here so a reserver assigned as a claim target only ever
-// attempts claimController on a tick it can actually succeed, and falls back to its
-// normal reserveController maintenance the rest of the time. Getting this wrong in
-// either direction is costly: attempting too early wastes a tick that should have kept
-// the reservation alive (see the claim-target branch below), and never attempting means
-// GCL2 landing does nothing on its own.
-function hasGclHeadroomForAnotherRoom(): boolean {
-  const ownedRoomCount = Object.values(Game.rooms).filter((room) => room.controller?.my).length;
-  return Game.gcl.level > ownedRoomCount;
-}
 
 export function run(creep: Creep): void {
   const remoteRoom = creep.memory.remoteRoom;

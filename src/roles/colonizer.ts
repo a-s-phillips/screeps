@@ -38,7 +38,11 @@ export function run(creep: Creep): void {
     return;
   }
 
-  if (!creep.room.controller) return;
+  // .my, not just existence - a pre-positioned colonizer (see remoteSpawnManager.ts's
+  // decideColonizerSpawn) can arrive before the claim actually lands, and
+  // upgradeController on a controller we don't own yet would just error every tick.
+  // Idling fully-loaded until planSpawn places a site (or the claim lands) is correct.
+  if (!creep.room.controller?.my) return;
 
   if (creep.upgradeController(creep.room.controller) === ERR_NOT_IN_RANGE) {
     creep.moveTo(creep.room.controller, MOVE_OPTS);
