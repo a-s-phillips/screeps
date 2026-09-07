@@ -4,6 +4,7 @@ import {
   decideNextRemoteSpawn,
   decideRemoteSpawn,
   decideScoutSpawn,
+  MAX_RESERVER_CLAIM_PARTS,
   remoteHaulerTarget,
   RemoteRoomState
 } from "../../src/spawn/remoteSpawnManager";
@@ -519,13 +520,79 @@ describe("decideNextRemoteSpawn", () => {
     expect(decision?.role).toBe("remoteHarvester");
   });
 
-  it("returns null when a reservation-contest reinforcement is unaffordable", () => {
+  it("returns null when a reservation-contest reinforcement is unaffordable and there's no other work", () => {
     const decision = decideNextRemoteSpawn(
       baseRemoteState({
         reserverCount: 1,
         ourReserverClaimParts: 1,
         hostileReservationClaimParts: 2,
         energyAvailable: 100
+      })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  // Regression coverage for the live bug this fix closes: W57N24's sustained
+  // reservation contest kept ourReserverClaimParts perpetually behind
+  // hostileReservationClaimParts + 1, and the old code hard-returned (reinforce, or
+  // null) right there every time - never reaching miner/remoteHarvester/remoteHauler
+  // below - even though a reserver was already present. Found live: 241 reserver
+  // spawns over ~174k ticks against W57N24, while remoteHauler sat at zero population
+  // 63% of that time.
+  it("falls through to an economy role when the reinforcement is unaffordable but a reserver is already present", () => {
+    // energyAvailable 300 covers a modest remoteHauler body but not the 1300-energy,
+    // 2-more-CLAIM-part reinforcement this contest calls for.
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        ourReserverClaimParts: 1,
+        hostileReservationClaimParts: 2,
+        energyAvailable: 300,
+        energyCapacityAvailable: 300,
+        remoteContainerCount: 1
+      })
+    );
+
+    expect(decision?.role).toBe("remoteHauler");
+  });
+
+  it("never builds a reserver past MAX_RESERVER_CLAIM_PARTS, no matter how far ahead the rival gets", () => {
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 0,
+        ourReserverClaimParts: 0,
+        hostileReservationClaimParts: 50,
+        energyAvailable: 10000,
+        energyCapacityAvailable: 10000
+      })
+    );
+
+    expect(decision?.role).toBe("reserver");
+    expect(decision?.body).toHaveLength(MAX_RESERVER_CLAIM_PARTS * 2);
+  });
+
+  it("stops escalating once already at the cap, even with an outmatching rival, and moves on to economy roles", () => {
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        ourReserverClaimParts: MAX_RESERVER_CLAIM_PARTS,
+        hostileReservationClaimParts: 50,
+        sourcesWithoutContainerCount: 1
+      })
+    );
+
+    expect(decision?.role).toBe("remoteHarvester");
+  });
+
+  it("still hard-blocks when there is no reserver presence at all, even under the cap", () => {
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 0,
+        ourReserverClaimParts: 0,
+        hostileReservationClaimParts: 0,
+        energyAvailable: 100,
+        remoteContainerCount: 1
       })
     );
 

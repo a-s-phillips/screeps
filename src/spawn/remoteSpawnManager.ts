@@ -16,6 +16,17 @@ import { SpawnDecision } from "./spawnDecision";
 // container: ~58 tiles out at full speed empty, ~110 ticks back loaded and unroaded).
 export const REMOTE_HAULER_ROUND_TRIP_ESTIMATE = 170;
 
+// neededClaimParts (see decideNextRemoteSpawn) chases the rival's current CLAIM count
+// plus one, forever - an opponent that keeps growing turns reservation contests into an
+// unbounded energy sink with no way to ever actually win, since the target keeps moving.
+// Capping how many CLAIM parts we'll ever build into a single reserver bounds that cost:
+// past this point we accept a losing (or merely contested) reservation rather than keep
+// escalating, which is fine because a losing reservation doesn't stop mining or hauling -
+// it only blocks new construction in that room - and because a rival worth this much
+// spawn energy is better answered with a combat solution (killing their reserver
+// outright) than with an ever-larger one of our own.
+export const MAX_RESERVER_CLAIM_PARTS = 3;
+
 // A source regenerates SOURCE_ENERGY_CAPACITY every ENERGY_REGEN_TIME ticks - the same
 // sustained-yield expression bodyPlanner.ts's SOURCE_SATURATION_WORK is built from.
 const SOURCE_YIELD_PER_TICK = SOURCE_ENERGY_CAPACITY / ENERGY_REGEN_TIME;
@@ -199,10 +210,12 @@ export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | n
   // sits there (found live in W57N24 - a 1-CLAIM reserver never even dented a 2-CLAIM
   // rival's reservation). Sizing to exactly one more than the rival's current CLAIM count
   // is the minimum body that actually reverses the reservation's direction instead of just
-  // slowing its growth.
+  // slowing its growth - but only up to MAX_RESERVER_CLAIM_PARTS (see its own comment):
+  // an escalating rival must not turn this into an unbounded energy sink.
   const neededClaimParts = state.hostileReservationClaimParts + 1;
-  if (state.ourReserverClaimParts < neededClaimParts) {
-    const body = planReserverBody(neededClaimParts - state.ourReserverClaimParts);
+  const targetClaimParts = Math.min(neededClaimParts, MAX_RESERVER_CLAIM_PARTS);
+  if (state.ourReserverClaimParts < targetClaimParts) {
+    const body = planReserverBody(targetClaimParts - state.ourReserverClaimParts);
     if (bodyCost(body) <= state.energyAvailable) {
       return {
         role: "reserver",
@@ -210,7 +223,15 @@ export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | n
         memory: { homeRoom: state.homeRoomName, remoteRoom: state.remoteRoomName }
       };
     }
-    return null;
+    // Only hard-block behind an unaffordable reinforcement when there's no reserver
+    // presence at all - vision/reservation has to come from somewhere first. An
+    // established room that already has a reserver out there but just can't afford (or
+    // has capped out) its next top-up shouldn't have miner/remoteHarvester/remoteHauler
+    // starved behind a reservation fight it's already chosen not to keep escalating -
+    // found live: W57N24's contest alone drove 241 reserver spawns over ~174k ticks
+    // while remoteHauler sat at zero population 63% of that time, because this used to
+    // return null unconditionally here regardless of whether a reserver already existed.
+    if (state.reserverCount === 0) return null;
   }
 
   if (state.sourcesNeedingMiner.length > 0) {
