@@ -600,6 +600,83 @@ describe("decideNextRemoteSpawn", () => {
   });
 });
 
+function mockClaimedRemoteRoom(opts: { name: string; hasSpawn?: boolean }) {
+  return {
+    name: opts.name,
+    controller: { my: true },
+    find: vi.fn((type: FindConstant) => (type === FIND_MY_SPAWNS && opts.hasSpawn ? [{}] : []))
+  };
+}
+
+describe("decideNextRemoteSpawn > colonizer", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("spawns a colonizer once the remote room is claimed and has no spawn yet", () => {
+    vi.stubGlobal("Game", {
+      rooms: { W8N8: mockClaimedRemoteRoom({ name: "W8N8" }) },
+      creeps: {}
+    });
+
+    const decision = decideNextRemoteSpawn(baseRemoteState({ reserverCount: 1 }));
+
+    expect(decision?.role).toBe("colonizer");
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W8N8" });
+  });
+
+  it("does nothing when the remote room isn't owned by us", () => {
+    vi.stubGlobal("Game", { rooms: {}, creeps: {} });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, sourcesWithoutContainerCount: 0 })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  it("does nothing once the claimed room already has its own spawn", () => {
+    vi.stubGlobal("Game", {
+      rooms: { W8N8: mockClaimedRemoteRoom({ name: "W8N8", hasSpawn: true }) },
+      creeps: {}
+    });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, sourcesWithoutContainerCount: 0 })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  it("does not spawn a second colonizer while one is already live", () => {
+    vi.stubGlobal("Game", {
+      rooms: { W8N8: mockClaimedRemoteRoom({ name: "W8N8" }) },
+      creeps: {
+        colonizer_1: { memory: { role: "colonizer", remoteRoom: "W8N8" } }
+      }
+    });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, sourcesWithoutContainerCount: 0 })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  it("returns null when a colonizer body is unaffordable and there's no other work", () => {
+    vi.stubGlobal("Game", {
+      rooms: { W8N8: mockClaimedRemoteRoom({ name: "W8N8" }) },
+      creeps: {}
+    });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, energyAvailable: 0, energyCapacityAvailable: 0 })
+    );
+
+    expect(decision).toBeNull();
+  });
+});
+
 function mockVisibleRemoteRoom(opts: {
   name: string;
   sources?: { id: string; pos: { x: number; y: number } }[];

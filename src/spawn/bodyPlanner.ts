@@ -28,7 +28,13 @@ const BASE_BLOCKS: Record<BlockRole, BodyPartConstant[]> = {
   // before. The retreat leg out of a Source Keeper's leash range is exactly the leg that
   // can't afford to be slow, so this trades the extra capacity back for guaranteed full
   // speed loaded or not, same as every other cross-room role in this codebase.
-  keeperHarvester: [WORK, CARRY, MOVE, MOVE]
+  keeperHarvester: [WORK, CARRY, MOVE, MOVE],
+  // Builds a freshly claimed room's first spawn (see roomPlanner.ts's planSpawn) - same
+  // 1:1 ratio as every other cross-room WORK-carrying role, for the same "no guaranteed
+  // roads" reasoning as remoteHarvester. A specific claim target might already have roads
+  // (W57N24 does, from prior remote mining), but this body has to work for any future
+  // colonization target, not just one that happens to be road-connected already.
+  colonizer: [WORK, CARRY, MOVE, MOVE]
 };
 
 // A source regenerates SOURCE_ENERGY_CAPACITY every ENERGY_REGEN_TIME ticks; each WORK

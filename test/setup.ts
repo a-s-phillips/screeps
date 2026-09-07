@@ -24,7 +24,10 @@ Object.assign(globalThis, {
   // that aren't exercising that behavior - tests needing specific values still override
   // via vi.stubGlobal, which restores to these defaults afterward.
   Memory: { rooms: {} },
-  Game: { time: 0 },
+  // rooms: {} matches production truth (Game.rooms always exists, just possibly with no
+  // entry for a given room) - added alongside decideColonizerSpawn's Game.rooms lookup so
+  // tests that don't care about it don't have to restub Game just to avoid a throw.
+  Game: { time: 0, rooms: {} },
   OK: 0,
   ERR_NOT_IN_RANGE: -9,
   ERR_NOT_ENOUGH_RESOURCES: -6,
@@ -84,6 +87,7 @@ Object.assign(globalThis, {
     claim: 600
   },
   CONTROLLER_STRUCTURES: {
+    spawn: { 0: 0, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 2, 8: 3 },
     extension: { 0: 0, 1: 0, 2: 5, 3: 10, 4: 20, 5: 30, 6: 40, 7: 50, 8: 60 },
     container: { 0: 5, 1: 5, 2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 5, 8: 5 },
     tower: { 0: 0, 1: 0, 2: 0, 3: 1, 4: 1, 5: 2, 6: 2, 7: 3, 8: 6 },

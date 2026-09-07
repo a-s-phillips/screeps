@@ -30,9 +30,15 @@ function mockRoom(opts: {
   pendingStorageSites?: { x: number; y: number }[];
   existingLinks?: { x: number; y: number }[];
   pendingLinkSites?: { x: number; y: number }[];
+  pendingSpawnSites?: { x: number; y: number }[];
   createResult?: ScreepsReturnCode;
   findPathResult?: { x: number; y: number }[];
   isMine?: boolean;
+  // Every other planner in roomPlanner.ts assumes a spawn already exists (that's the
+  // whole reason planSpawn exists), so this defaults to true to keep every existing test
+  // above exercising its own spawn-anchored behavior unchanged. planSpawn's own tests
+  // are the ones that flip it to false.
+  hasSpawn?: boolean;
 }) {
   const existingExtensions = opts.existingExtensions ?? [];
   const pendingExtensionSites = opts.pendingExtensionSites ?? [];
@@ -49,6 +55,8 @@ function mockRoom(opts: {
   const pendingStorageSites = opts.pendingStorageSites ?? [];
   const existingLinks = opts.existingLinks ?? [];
   const pendingLinkSites = opts.pendingLinkSites ?? [];
+  const pendingSpawnSites = opts.pendingSpawnSites ?? [];
+  const hasSpawn = opts.hasSpawn ?? true;
   const spawn = { pos: { x: 25, y: 25 } };
 
   const room = {
@@ -78,12 +86,13 @@ function mockRoom(opts: {
           ...pendingTowerSites.map((p) => ({ structureType: STRUCTURE_TOWER, pos: p })),
           ...pendingRampartSites.map((p) => ({ structureType: STRUCTURE_RAMPART, pos: p })),
           ...pendingStorageSites.map((p) => ({ structureType: STRUCTURE_STORAGE, pos: p })),
-          ...pendingLinkSites.map((p) => ({ structureType: STRUCTURE_LINK, pos: p }))
+          ...pendingLinkSites.map((p) => ({ structureType: STRUCTURE_LINK, pos: p })),
+          ...pendingSpawnSites.map((p) => ({ structureType: STRUCTURE_SPAWN, pos: p }))
         ];
       }
       if (type === FIND_CONSTRUCTION_SITES) return [];
       if (type === FIND_SOURCES) return sources.map((p) => ({ pos: p }));
-      if (type === FIND_MY_SPAWNS) return [spawn];
+      if (type === FIND_MY_SPAWNS) return hasSpawn ? [spawn] : [];
       return [];
     }),
     getTerrain: vi.fn(() => ({ get: () => 0 })),
@@ -111,6 +120,84 @@ describe("planRoom", () => {
     planRoom(room, {});
 
     expect((room as unknown as { find: ReturnType<typeof vi.fn> }).find).not.toHaveBeenCalled();
+  });
+
+  describe("spawn (planSpawn)", () => {
+    it("does nothing when a spawn already exists", () => {
+      const room = mockRoom({ level: 1 });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_SPAWN
+      );
+    });
+
+    it("counts a pending spawn site toward the cap, not just a built spawn", () => {
+      const room = mockRoom({ level: 1, hasSpawn: false, pendingSpawnSites: [{ x: 10, y: 10 }] });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_SPAWN
+      );
+    });
+
+    it("does nothing below the RCL where CONTROLLER_STRUCTURES.spawn is 0", () => {
+      const room = mockRoom({ level: 0, hasSpawn: false });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).not.toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_SPAWN
+      );
+    });
+
+    it("places a spawn site anchored on the controller when there's no existing container", () => {
+      const room = mockRoom({ level: 1, hasSpawn: false });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(room.createConstructionSite).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        STRUCTURE_SPAWN
+      );
+      expect(logger.log).toHaveBeenCalledWith(
+        "construction_site_planned",
+        expect.objectContaining({ room: "W1N1", structureType: STRUCTURE_SPAWN })
+      );
+    });
+
+    it("prefers an existing container over the controller as the anchor", () => {
+      // Container far from the mock's default controller pos (40,40) - if the result
+      // lands within the container's search radius, the controller wasn't the anchor.
+      const room = mockRoom({ level: 1, hasSpawn: false, existingContainers: [{ x: 5, y: 5 }] });
+
+      planRoom(room, { roadPlan: [] });
+
+      const call = (room.createConstructionSite as ReturnType<typeof vi.fn>).mock.calls.find(
+        (args) => args[2] === STRUCTURE_SPAWN
+      );
+      expect(call).toBeDefined();
+      const [x, y] = call as [number, number, StructureConstant];
+      const distanceToContainer = Math.max(Math.abs(x - 5), Math.abs(y - 5));
+      expect(distanceToContainer).toBeLessThanOrEqual(8);
+    });
+
+    it("does not log when createConstructionSite fails", () => {
+      const room = mockRoom({ level: 1, hasSpawn: false, createResult: ERR_NOT_ENOUGH_ENERGY });
+
+      planRoom(room, { roadPlan: [] });
+
+      expect(logger.log).not.toHaveBeenCalled();
+    });
   });
 
   describe("extensions", () => {

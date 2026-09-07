@@ -5,6 +5,7 @@ import { findContainerSite } from "./containerPlanner";
 import { findExtensionSite } from "./extensionPlanner";
 import { findLinkSite } from "./linkPlanner";
 import { planRoads } from "./roadPlanner";
+import { findSpawnSite } from "./spawnPlanner";
 import { findStorageSite } from "./storagePlanner";
 import { findTowerSite } from "./towerPlanner";
 
@@ -50,6 +51,48 @@ function buildOccupancy(room: Room): {
     isWalkable: (x, y) => terrain.get(x, y) !== TERRAIN_MASK_WALL,
     isOccupied: (x, y) => occupied.has(`${x},${y}`)
   };
+}
+
+// A freshly claimed room has a controller but no spawn - every other planner function in
+// this file (planExtensions, planTowers, planStorage, ...) is spawn-anchored and
+// silently no-ops without one, so nothing else here can ever get the room off the ground
+// on its own. Anchored on an existing container when the room already has remote-mining
+// infrastructure (the expected case - a claim target is usually a former remote room,
+// already reachable and economically proven), falling back to the controller (guaranteed
+// to exist the instant a room is claimed) otherwise. Building the site is colonizer.ts's
+// job, spawned via remoteSpawnManager.ts's decideColonizerSpawn - this only ever places
+// the one site.
+function planSpawn(room: Room): void {
+  if (!room.controller) return;
+
+  const allowed = CONTROLLER_STRUCTURES[STRUCTURE_SPAWN][room.controller.level] ?? 0;
+
+  const existingSpawns = getCachedFind(room, FIND_MY_SPAWNS).length;
+  const pendingSpawnSites = getCachedFind(room, FIND_MY_CONSTRUCTION_SITES).filter(
+    (site) => site.structureType === STRUCTURE_SPAWN
+  ).length;
+  if (existingSpawns + pendingSpawnSites >= allowed) return;
+
+  const { isWalkable, isOccupied } = buildOccupancy(room);
+  const existingContainer = getCachedFind(room, FIND_STRUCTURES).find(
+    (structure): structure is StructureContainer => structure.structureType === STRUCTURE_CONTAINER
+  );
+  const anchor: Point = existingContainer
+    ? { x: existingContainer.pos.x, y: existingContainer.pos.y }
+    : { x: room.controller.pos.x, y: room.controller.pos.y };
+
+  const site = findSpawnSite(isWalkable, isOccupied, anchor);
+  if (!site) return;
+
+  const result = room.createConstructionSite(site.x, site.y, STRUCTURE_SPAWN);
+  if (result === OK) {
+    log("construction_site_planned", {
+      room: room.name,
+      x: site.x,
+      y: site.y,
+      structureType: STRUCTURE_SPAWN
+    });
+  }
 }
 
 // Returns whether the extension queue is empty (at/over cap, nothing left to build) -
@@ -356,6 +399,7 @@ export function planRoom(
     return;
   }
 
+  planSpawn(room);
   const extensionsDone = planExtensions(room);
   planContainers(room);
   const roadsDone = planRoads(room, memory);

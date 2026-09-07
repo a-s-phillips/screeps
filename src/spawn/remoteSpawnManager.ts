@@ -190,6 +190,40 @@ export function buildRemoteRoomState(homeRoom: Room, remoteRoomName: string): Re
   };
 }
 
+// One colonizer at a time is plenty - it only needs to get a single spawn site built
+// (see roomPlanner.ts's planSpawn), not run an ongoing economy. Once the spawn
+// completes, main.ts's generic per-spawn pipeline takes over on its own.
+const COLONIZER_TARGET = 1;
+
+function countLiveColonizers(remoteRoomName: string): number {
+  let count = 0;
+  for (const name in Game.creeps) {
+    const creep = Game.creeps[name];
+    if (creep.memory.remoteRoom === remoteRoomName && creep.memory.role === "colonizer") count++;
+  }
+  return count;
+}
+
+// Only fires once a remote room has actually been claimed (controller.my) - claiming
+// itself is reserver.ts's job (see RoomMemory.claimTarget), this just handles what
+// happens after: a claimed room has a controller but no spawn, and nothing else in the
+// codebase places or builds one on its own (see roomPlanner.ts's planSpawn).
+function decideColonizerSpawn(state: RemoteRoomState): SpawnDecision | null {
+  const remoteRoom = Game.rooms[state.remoteRoomName];
+  if (!remoteRoom?.controller?.my) return null;
+  if (getCachedFind(remoteRoom, FIND_MY_SPAWNS).length > 0) return null;
+  if (countLiveColonizers(state.remoteRoomName) >= COLONIZER_TARGET) return null;
+
+  const body = planBody("colonizer", state.energyCapacityAvailable);
+  if (body.length === 0 || bodyCost(body) > state.energyAvailable) return null;
+
+  return {
+    role: "colonizer",
+    body,
+    memory: { homeRoom: state.homeRoomName, remoteRoom: state.remoteRoomName }
+  };
+}
+
 // Mirrors spawnManager.ts's own local priority: a reserver first (keeps the room
 // reserved to us, and is the thing that establishes vision in the first place), then a
 // miner for any source that already has a container but no miner - a real economy
@@ -233,6 +267,9 @@ export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | n
     // return null unconditionally here regardless of whether a reserver already existed.
     if (state.reserverCount === 0) return null;
   }
+
+  const colonizerDecision = decideColonizerSpawn(state);
+  if (colonizerDecision) return colonizerDecision;
 
   if (state.sourcesNeedingMiner.length > 0) {
     const body = planMinerBody(state.energyCapacityAvailable);

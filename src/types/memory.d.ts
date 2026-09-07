@@ -10,7 +10,8 @@ declare global {
     | "remoteHarvester"
     | "remoteHauler"
     | "defender"
-    | "keeperHarvester";
+    | "keeperHarvester"
+    | "colonizer";
 
   interface CreepMemory {
     role: CreepRole;
