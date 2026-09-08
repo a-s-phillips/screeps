@@ -296,14 +296,17 @@ function decideColonizerSpawn(state: RemoteRoomState): SpawnDecision | null {
 
 // A flat target of 1 assumed ender2012's historically unarmed CLAIM+MOVE presence - that
 // assumption broke live: W57N24 took a two-skirmisher assault (4 TOUGH/12 MOVE/8 ATTACK,
-// 2400 HP each), which a single max-body defender (13 ATTACK/13 MOVE at 1800 capacity,
-// 1300 HP, 390 DPS) loses even 1-on-1 (390 DPS needs 6.15 ticks to kill a 2400 HP
-// skirmisher; 240 incoming DPS kills our defender in 5.4). Scaling to the live combat
-// headcount, same "rival's count + 1" margin MAX_RESERVER_CLAIM_PARTS's comment explains
-// for reservation contests, guarantees an actual numbers advantage rather than parity -
-// at 3-on-2 our combined DPS (1170) kills one skirmisher in ~2 ticks before either side
-// takes a serious loss, then mops up the second at 2-on-1. Capped so an escalating rival
-// can't turn this into an unbounded spawn sink, same rationale as MAX_RESERVER_CLAIM_PARTS.
+// 2400 HP each). A single max-body defender (13 ATTACK/13 MOVE at 1800 capacity, 2600 HP,
+// 390 DPS) wins 1-on-1 (6.15 ticks to kill a 2400 HP skirmisher vs 10.8 to die to its 240
+// DPS), but loses when both skirmishers attack it at once: their combined 480 DPS kills
+// our defender (2600 HP) in 5.4 ticks, faster than its 390 DPS can kill either one (6.15
+// ticks). Scaling to the live combat headcount, same "rival's count + 1" margin
+// MAX_RESERVER_CLAIM_PARTS's comment explains for reservation contests, guarantees an
+// actual numbers advantage rather than a race that can go either way - at 3-on-2, our
+// combined 1170 DPS drops one skirmisher in ~2.05 ticks (they've dealt at most ~985
+// combined damage back by then, well under any single defender's 2600 HP), then mops up
+// the second 2-on-1. Capped so an escalating rival can't turn this into an unbounded
+// spawn sink, same rationale as MAX_RESERVER_CLAIM_PARTS.
 const REMOTE_DEFENDER_TARGET_CAP = 4;
 
 function remoteDefenderTargetFor(state: RemoteRoomState): number {
