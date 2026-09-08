@@ -856,6 +856,34 @@ describe("decideNextRemoteSpawn > colonizer", () => {
     expect(decision).toBeNull();
   });
 
+  it("stops spawning remote economy roles once the remote room is owned by us and has its own spawn", () => {
+    vi.stubGlobal("Game", {
+      rooms: { W8N8: mockClaimedRemoteRoom({ name: "W8N8", hasSpawn: true }) },
+      creeps: {}
+    });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        remoteContainerCount: 1,
+        sourcesNeedingMiner: ["source1" as Id<Source>]
+      })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  it("still spawns remote economy roles for an owned room that hasn't finished its own spawn yet", () => {
+    vi.stubGlobal("Game", {
+      rooms: { W8N8: mockClaimedRemoteRoom({ name: "W8N8", hasSpawn: false }) },
+      creeps: { colonizer_1: { memory: { role: "colonizer", remoteRoom: "W8N8" } } }
+    });
+
+    const decision = decideNextRemoteSpawn(baseRemoteState({ reserverCount: 1, remoteContainerCount: 1 }));
+
+    expect(decision?.role).toBe("remoteHauler");
+  });
+
   it("dispatches a colonizer to a claimed, spawnless room despite a recent sighting once a defender is already escorting it", () => {
     // A rival that pings the room roughly every 190 ticks would otherwise keep
     // hostileRecentlySeen permanently true and stall the spawn build forever - an

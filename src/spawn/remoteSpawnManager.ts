@@ -437,6 +437,20 @@ export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | n
   const colonizerDecision = decideColonizerSpawn(state);
   if (colonizerDecision) return colonizerDecision;
 
+  // Once this remote room is both owned by us and has its own spawn, main.ts's generic
+  // per-spawn pipeline (spawnManager.ts) is already running a local economy for it -
+  // continuing past this point would double-spawn miner/remoteHarvester/remoteHauler for
+  // the same room's mining/hauling that a local miner/hauler already covers. Found live:
+  // W57N24 kept getting remoteHauler creeps from W57N25's pipeline well after its own
+  // spawn (and local haulers) came online, because remoteRooms/claimTarget are deliberately
+  // left pointing at it forever (see decideRemoteDefenderSpawn's comment on why the
+  // defender above must NOT stand down post-claim) - nothing analogous should apply to the
+  // economy roles below, which the local pipeline has already taken over.
+  if (isOwnedByUs) {
+    const remoteRoom = Game.rooms[state.remoteRoomName];
+    if (remoteRoom && getCachedFind(remoteRoom, FIND_MY_SPAWNS).length > 0) return null;
+  }
+
   if (state.sourcesNeedingMiner.length > 0) {
     const body = planMinerBody(state.energyCapacityAvailable);
     if (body.length > 0 && bodyCost(body) <= state.energyAvailable) {
