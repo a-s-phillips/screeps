@@ -144,6 +144,55 @@ describe("builder role", () => {
     expect(creep.build).toHaveBeenCalledWith(containerSite);
   });
 
+  it("prioritizes a rampart construction site over a cheaper, non-defensive site", () => {
+    // Regression test: found live in W57N24 - a rampart on the spawn's tile (built
+    // specifically to get ahead of a repeat attack) sat at 0/1 progress for hours because
+    // builders kept converging on extension sites instead, the same "closest wins
+    // forever" problem containers already had (see the container-priority test above).
+    const otherSite = { id: "site1", structureType: STRUCTURE_EXTENSION };
+    const rampartSite = { id: "site2", structureType: STRUCTURE_RAMPART };
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 50,
+      freeCapacity: 0,
+      sites: [otherSite, rampartSite]
+    });
+
+    run(creep);
+
+    expect(creep.build).toHaveBeenCalledWith(rampartSite);
+  });
+
+  it("prioritizes a tower construction site over a cheaper, non-defensive site", () => {
+    const otherSite = { id: "site1", structureType: STRUCTURE_EXTENSION };
+    const towerSite = { id: "site2", structureType: STRUCTURE_TOWER };
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 50,
+      freeCapacity: 0,
+      sites: [otherSite, towerSite]
+    });
+
+    run(creep);
+
+    expect(creep.build).toHaveBeenCalledWith(towerSite);
+  });
+
+  it("still prioritizes a container site over a rampart site", () => {
+    const rampartSite = { id: "site1", structureType: STRUCTURE_RAMPART };
+    const containerSite = { id: "site2", structureType: STRUCTURE_CONTAINER };
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 50,
+      freeCapacity: 0,
+      sites: [rampartSite, containerSite]
+    });
+
+    run(creep);
+
+    expect(creep.build).toHaveBeenCalledWith(containerSite);
+  });
+
   it("falls back to the closest site of any type when there are no container sites", () => {
     const siteA = { id: "site1", structureType: STRUCTURE_EXTENSION };
     const siteB = { id: "site2", structureType: STRUCTURE_ROAD };
