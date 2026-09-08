@@ -188,6 +188,35 @@ describe("harvestFromNearestSource", () => {
     expect(creep.moveTo).not.toHaveBeenCalled();
   });
 
+  // Regression test: found live in W57N24 - a bootstrap harvester (same source-selection
+  // helper as gatherEnergy below) squatted on the one accessible tile next to a source
+  // that already had a container, blocking the dedicated miner from ever reaching it.
+  it("ignores a source that already has a container built next to it", () => {
+    const source = { id: "source1", pos: { x: 5, y: 5 } } as unknown as Source;
+    const creep = {
+      room: {
+        name: "W1N1",
+        find: vi.fn((type: FindConstant) => {
+          if (type === FIND_SOURCES_ACTIVE) return [source];
+          if (type === FIND_STRUCTURES) {
+            return [{ structureType: STRUCTURE_CONTAINER, pos: { x: 5, y: 6 } }];
+          }
+          return [];
+        })
+      },
+      pos: {
+        findClosestByPath: vi.fn((candidates: unknown[]) => candidates[0] ?? null)
+      },
+      harvest: vi.fn().mockReturnValue(OK),
+      moveTo: vi.fn()
+    } as unknown as Creep;
+
+    harvestFromNearestSource(creep);
+
+    expect(creep.harvest).not.toHaveBeenCalled();
+    expect(creep.moveTo).not.toHaveBeenCalled();
+  });
+
   it("harvests without moving when already in range", () => {
     const creep = mockCreep({ harvestResult: OK });
 
@@ -746,6 +775,25 @@ describe("gatherEnergy", () => {
     gatherEnergy(creep);
 
     expect(creep.moveTo).toHaveBeenCalledWith(expect.objectContaining({ id: "c1" }), MOVE_OPTS);
+  });
+
+  // Regression test: found live in W57N24 - upgraders squatted on the source-adjacent
+  // tile a miner needed, because the container was freshly built and still empty (0
+  // energy never wins the "fullest container" comparison), so direct-harvest was the
+  // only fallback gatherEnergy had left. A source with a container belongs to the
+  // miner+hauler pipeline even before that container has anything in it.
+  it("does not harvest a source directly once it has a container, even an empty one", () => {
+    const creep = mockGatherCreep({
+      pos: { x: 0, y: 0 },
+      sources: [{ id: "s1", pos: { x: 1, y: 0 } }],
+      containers: [{ id: "c1", pos: { x: 1, y: 1 }, usedCapacity: 0 }]
+    });
+
+    gatherEnergy(creep);
+
+    expect(creep.harvest).not.toHaveBeenCalled();
+    expect(creep.withdraw).not.toHaveBeenCalled();
+    expect(creep.moveTo).not.toHaveBeenCalled();
   });
 });
 

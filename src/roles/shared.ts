@@ -64,8 +64,28 @@ export function decideWorkingState(
   return currentlyWorking;
 }
 
+// A source with a container already built belongs to the miner+hauler pipeline (see
+// spawnManager.ts's harvesterTargetFor comment) - a generalist creep (upgrader, builder,
+// colonizer, bootstrap harvester) parking on its one accessible tile to harvest directly
+// can permanently block the miner from ever reaching the container. Found live in
+// W57N24: upgraders squatted on the source-adjacent tile the miner needed, because the
+// freshly built container hadn't been filled yet (no hauler had drawn from it) so it
+// never won the "fullest container" comparison in gatherEnergy below, leaving
+// direct-harvest as the only fallback. Excluding mined sources here forces those
+// generalists to wait on the container (or dropped energy, or idle) instead of
+// contesting the miner's tile - safe even before the container has any energy in it,
+// since the whole point of building one is to hand this source off to the miner.
+function isMinedSource(creep: Creep, source: Source): boolean {
+  const containers = getCachedFind(creep.room, FIND_STRUCTURES).filter(
+    (structure): structure is StructureContainer => structure.structureType === STRUCTURE_CONTAINER
+  );
+  return containers.some((container) => chebyshevDistance(source.pos, container.pos) <= 1);
+}
+
 function findNearestActiveSource(creep: Creep): Source | undefined {
-  const sources = getCachedFind(creep.room, FIND_SOURCES_ACTIVE);
+  const sources = getCachedFind(creep.room, FIND_SOURCES_ACTIVE).filter(
+    (source) => !isMinedSource(creep, source)
+  );
   return creep.pos.findClosestByPath(sources) ?? undefined;
 }
 
