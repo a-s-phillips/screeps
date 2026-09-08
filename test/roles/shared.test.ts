@@ -649,6 +649,7 @@ function mockGatherCreep(opts: {
   pos: { x: number; y: number };
   sources?: { id: string; pos: { x: number; y: number } }[];
   containers?: { id: string; pos: { x: number; y: number }; usedCapacity: number }[];
+  controller?: { pos: { x: number; y: number } };
   harvestResult?: ScreepsReturnCode;
   withdrawResult?: ScreepsReturnCode;
 }) {
@@ -658,6 +659,7 @@ function mockGatherCreep(opts: {
   return {
     room: {
       name: "W1N1",
+      controller: opts.controller,
       find: vi.fn((type: FindConstant) => {
         if (type === FIND_SOURCES_ACTIVE) return sources;
         if (type === FIND_STRUCTURES) {
@@ -793,6 +795,40 @@ describe("gatherEnergy", () => {
 
     expect(creep.harvest).not.toHaveBeenCalled();
     expect(creep.withdraw).not.toHaveBeenCalled();
+    expect(creep.moveTo).not.toHaveBeenCalled();
+  });
+
+  // Regression test: found live in W57N24 - once the mined-source exclusion above
+  // stopped an upgrader from harvesting the source it was parked on, it had nothing left
+  // to do at all and simply froze on the container's exact tile, permanently blocking
+  // the miner that tile belongs to and stalling the room's entire energy input. Idling
+  // is only safe when the creep isn't standing somewhere another role specifically needs.
+  it("moves toward the controller instead of idling when parked on an empty container's tile with nothing to gather", () => {
+    const creep = mockGatherCreep({
+      pos: { x: 1, y: 1 },
+      sources: [{ id: "s1", pos: { x: 0, y: 0 } }],
+      containers: [{ id: "c1", pos: { x: 1, y: 1 }, usedCapacity: 0 }],
+      controller: { pos: { x: 25, y: 25 } }
+    });
+
+    gatherEnergy(creep);
+
+    expect(creep.harvest).not.toHaveBeenCalled();
+    expect(creep.withdraw).not.toHaveBeenCalled();
+    expect(creep.moveTo).toHaveBeenCalledWith(
+      expect.objectContaining({ pos: { x: 25, y: 25 } }),
+      MOVE_OPTS
+    );
+  });
+
+  it("still does nothing when idling somewhere that isn't a container's tile", () => {
+    const creep = mockGatherCreep({
+      pos: { x: 1, y: 1 },
+      controller: { pos: { x: 25, y: 25 } }
+    });
+
+    gatherEnergy(creep);
+
     expect(creep.moveTo).not.toHaveBeenCalled();
   });
 });

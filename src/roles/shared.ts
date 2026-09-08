@@ -295,7 +295,31 @@ export function gatherEnergy(creep: Creep): void {
     if (creep.withdraw(fullestContainer, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
       creep.moveTo(fullestContainer, MOVE_OPTS);
     }
+    return;
   }
+
+  // Nothing to gather - previously harmless to just idle in place, but not when the
+  // creep happens to already be parked exactly on a container's tile: reaching this
+  // branch means every container in the room is empty (findFullestContainer only
+  // returns one with energy) and, if it's a mined source's container, isMinedSource has
+  // already ruled out harvesting there directly. Idling on that tile would permanently
+  // block whoever actually needs to stand on it (a miner most of all). Found live in
+  // W57N24: an upgrader ended up parked on a source's container tile with nothing left
+  // to do and simply froze there, wedging the miner out and stalling the room's entire
+  // energy input at zero. Heading toward the controller is enough to step off the tile;
+  // arriving isn't the point.
+  if (creep.room.controller && isOnContainerTile(creep)) {
+    creep.moveTo(creep.room.controller, MOVE_OPTS);
+  }
+}
+
+function isOnContainerTile(creep: Creep): boolean {
+  return getCachedFind(creep.room, FIND_STRUCTURES).some(
+    (structure) =>
+      structure.structureType === STRUCTURE_CONTAINER &&
+      structure.pos.x === creep.pos.x &&
+      structure.pos.y === creep.pos.y
+  );
 }
 
 // Scoped narrowly to "build the pending container site in my current room" - unlike
