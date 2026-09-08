@@ -1042,11 +1042,23 @@ describe("travelToRoom", () => {
 
 describe("MOVE_OPTS", () => {
   it("caps pathfinding to a single room, since every caller is already in the room it needs to act in", () => {
-    // Found live: a remote defender with no maxRooms cap could path a chase/approach
-    // move back out through a neighboring room's border if that looked cheaper, then
-    // travelToRoom immediately sent it back in on the very next tick - an unbounded
-    // ping-pong across the border with no state remembering "already arrived". Crossing
-    // rooms is travelToRoom/REMOTE_MOVE_OPTS's job, never this one's.
+    // Crossing rooms is travelToRoom/REMOTE_MOVE_OPTS's job, never this one's - ruling
+    // out an in-room move ever routing back out through a neighboring room's border,
+    // even though that turned out not to be the cause of the live border ping-pong (see
+    // REMOTE_MOVE_OPTS's own test below for the actual mechanism).
     expect(MOVE_OPTS.maxRooms).toBe(1);
+  });
+});
+
+describe("REMOTE_MOVE_OPTS", () => {
+  it("only requires getting adjacent to the cross-room waypoint, not standing on its exact tile", () => {
+    // Found live: travelToRoom's (25,25) waypoint is a wall in some rooms' generated
+    // terrain (confirmed in W57N24). moveTo's default range: 0 demands the creep reach
+    // that exact unreachable tile; PathFinder.search with range 0 against an unreachable
+    // goal comes back incomplete, and following an incomplete cross-room path is what
+    // produced a remote defender ping-ponging across the W57N24/W57N25 border every
+    // tick. range: 1 only needs adjacency, which is all travelToRoom ever actually
+    // wanted (see its own "arbitrary waypoint" comment).
+    expect(REMOTE_MOVE_OPTS.range).toBe(1);
   });
 });

@@ -5,16 +5,24 @@ import { getCachedFind } from "../utils/roomCache";
 // maxRooms: 1 - every caller uses this once a creep is already in the room it needs to
 // act in (chase a hostile, walk to a container/controller/spawn); crossing rooms is
 // travelToRoom/REMOTE_MOVE_OPTS's job, never this one's. Without the cap, the pathfinder
-// is free to route through a neighboring room if that looks cheaper (e.g. a chokepoint
-// right at a border), which can send a creep back out the way it came - found live: a
-// remote defender freshly arrived in a claim-target room ping-ponged across the border
-// back into the home room and immediately back in, forever, because travelToRoom has no
-// memory of "already arrived" and re-fires the moment creep.room.name flips back.
+// is technically free to route through a neighboring room if that looked cheaper -
+// harmless to rule out even though it turned out not to be the cause of the border
+// ping-pong below (see REMOTE_MOVE_OPTS's comment for the actual mechanism).
 export const MOVE_OPTS: MoveToOpts = { reusePath: 5, maxRooms: 1 };
 // Cross-room trips are long and mostly unroaded/static terrain, so a much longer path
 // cache is worth it - a local reusePath of 5 would recompute the whole route far more
 // often than the terrain along the way ever actually changes.
-export const REMOTE_MOVE_OPTS: MoveToOpts = { reusePath: 20 };
+//
+// range: 1, deliberately - travelToRoom's target tile (25,25) is an arbitrary waypoint
+// (see its own comment) that happens to be a *wall* in some rooms' generated terrain
+// (confirmed live in W57N24). moveTo defaults to range: 0, requiring the creep to stand
+// on that exact tile; PathFinder.search with range 0 against an unreachable goal comes
+// back incomplete, and an incomplete cross-room path is what produced a remote defender
+// ping-ponging across the W57N24/W57N25 border every tick - crossing in, failing to
+// progress toward the unreachable (25,25), and re-triggering travelToRoom's moveTo the
+// moment it stepped back out. range: 1 only requires getting adjacent, which is all this
+// function ever actually needed.
+export const REMOTE_MOVE_OPTS: MoveToOpts = { reusePath: 20, range: 1 };
 
 // Room center is a deliberately arbitrary waypoint - the creep doesn't care about a
 // specific tile, just crossing the border, and moveTo paths across rooms it has no
