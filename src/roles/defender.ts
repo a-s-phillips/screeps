@@ -22,6 +22,15 @@ export function run(creep: Creep): void {
     return;
   }
 
-  const spawn = getCachedFind(creep.room, FIND_MY_SPAWNS)[0];
-  if (spawn) creep.moveTo(spawn, MOVE_OPTS);
+  // Falls back to the controller, not just idling, once there's neither a hostile nor a
+  // spawn to head for - found live: a creep that comes to rest exactly on the border
+  // row/column it crossed on (travelToRoom's arrival point, before it's taken any further
+  // step inward) can get reverted by the engine to the room it came from, even with zero
+  // move intent issued. Every other remote role already has a real fallback destination
+  // once its main job is done (colonizer/reserver both gravitate to the controller too),
+  // which incidentally walks it off the exact border tile - defender was the one role
+  // with a genuine "do nothing" fallback, and paid for it with an unbounded per-tick
+  // ping-pong across the border.
+  const anchor = getCachedFind(creep.room, FIND_MY_SPAWNS)[0] ?? creep.room.controller;
+  if (anchor) creep.moveTo(anchor, MOVE_OPTS);
 }

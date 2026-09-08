@@ -4,21 +4,26 @@ import { MOVE_OPTS, REMOTE_MOVE_OPTS } from "../../src/roles/shared";
 import { resetRoomCache } from "../../src/utils/roomCache";
 
 const spawn = { id: "spawn1", structureType: STRUCTURE_SPAWN };
+const controller = { id: "controller1" };
 
 function mockCreep(opts: {
   hostiles?: { id: string }[];
   attackResult?: ScreepsReturnCode;
   roomName?: string;
   remoteRoom?: string;
+  spawns?: { id: string; structureType: string }[];
+  controller?: { id: string };
 }) {
   const hostiles = opts.hostiles ?? [];
   const roomName = opts.roomName ?? "W1N1";
+  const spawns = opts.spawns ?? [spawn];
 
   const room = {
     name: roomName,
+    controller: opts.controller,
     find: vi.fn((type: FindConstant) => {
       if (type === FIND_HOSTILE_CREEPS) return hostiles;
-      if (type === FIND_MY_SPAWNS) return [spawn];
+      if (type === FIND_MY_SPAWNS) return spawns;
       return [];
     })
   };
@@ -67,16 +72,26 @@ describe("defender run", () => {
     expect(creep.moveTo).toHaveBeenCalledWith(spawn, MOVE_OPTS);
   });
 
-  it("does nothing when there is no hostile and no spawn to rally to", () => {
-    const creep = mockCreep({});
-    (creep.room.find as ReturnType<typeof vi.fn>).mockImplementation((type: FindConstant) => {
-      if (type === FIND_MY_SPAWNS) return [];
-      return [];
-    });
+  it("does nothing when there is no hostile, no spawn, and no controller to rally to", () => {
+    const creep = mockCreep({ spawns: [] });
 
     run(creep);
 
     expect(creep.moveTo).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the controller when there is no hostile and no spawn yet", () => {
+    // Found live: a defender with genuinely nothing to do (no hostile, no spawn) would
+    // just idle in place - and if that place happened to be the exact border tile it
+    // crossed on, the engine could revert it to the room it came from with zero move
+    // intent issued, producing an unbounded per-tick ping-pong. Falling back to the
+    // controller (guaranteed once the room is claimed) walks it off that tile instead,
+    // same as colonizer/reserver's own "nothing else to do" fallback.
+    const creep = mockCreep({ spawns: [], controller });
+
+    run(creep);
+
+    expect(creep.moveTo).toHaveBeenCalledWith(controller, MOVE_OPTS);
   });
 
   it("travels to the remote room before fighting, instead of retreating from a hostile there", () => {

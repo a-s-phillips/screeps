@@ -1043,22 +1043,23 @@ describe("travelToRoom", () => {
 describe("MOVE_OPTS", () => {
   it("caps pathfinding to a single room, since every caller is already in the room it needs to act in", () => {
     // Crossing rooms is travelToRoom/REMOTE_MOVE_OPTS's job, never this one's - ruling
-    // out an in-room move ever routing back out through a neighboring room's border,
-    // even though that turned out not to be the cause of the live border ping-pong (see
-    // REMOTE_MOVE_OPTS's own test below for the actual mechanism).
+    // out an in-room move ever routing back out through a neighboring room's border.
+    // Investigated as a candidate cause of a live W57N24 border ping-pong bug; the real
+    // cause turned out to be elsewhere (see defender.ts's anchor-fallback test), but
+    // this cap is a correct, harmless hardening regardless.
     expect(MOVE_OPTS.maxRooms).toBe(1);
   });
 });
 
 describe("REMOTE_MOVE_OPTS", () => {
   it("only requires getting adjacent to the cross-room waypoint, not standing on its exact tile", () => {
-    // Found live: travelToRoom's (25,25) waypoint is a wall in some rooms' generated
+    // Found live: travelToRoom's (25,25) waypoint can be a wall in some rooms' generated
     // terrain (confirmed in W57N24). moveTo's default range: 0 demands the creep reach
-    // that exact unreachable tile; PathFinder.search with range 0 against an unreachable
-    // goal comes back incomplete, and following an incomplete cross-room path is what
-    // produced a remote defender ping-ponging across the W57N24/W57N25 border every
-    // tick. range: 1 only needs adjacency, which is all travelToRoom ever actually
-    // wanted (see its own "arbitrary waypoint" comment).
+    // that exact tile; PathFinder.search with range 0 against an unreachable goal comes
+    // back incomplete. range: 1 only needs adjacency, which is all travelToRoom ever
+    // actually wanted (see its own "arbitrary waypoint" comment) - a legitimate fix in
+    // its own right, though it turned out not to be what was causing the border
+    // ping-pong bug (see defender.ts's anchor-fallback test for the actual mechanism).
     expect(REMOTE_MOVE_OPTS.range).toBe(1);
   });
 });
