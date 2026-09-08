@@ -25,6 +25,7 @@ function baseState(overrides: Partial<RoomState> = {}): RoomState {
     controllerLevel: 1,
     hostileCreepCount: 0,
     hostileRecentlySeen: false,
+    doctrine: "econ",
     ...overrides
   };
 }
@@ -126,6 +127,38 @@ describe("decideNextSpawn", () => {
     });
 
     expect(decideNextSpawn(state)).toBeNull();
+  });
+
+  describe("colonize doctrine", () => {
+    it("caps the upgrader target at 1 even at a high controller level, freeing spawn priority for remote/colonizer work", () => {
+      const state = baseState({
+        creepCounts: { harvester: 2, upgrader: 1, builder: 0, hauler: 0, miner: 0 },
+        controllerLevel: 6, // target under "econ" would be min(6 + 1, 4) = 4
+        doctrine: "colonize"
+      });
+
+      expect(decideNextSpawn(state)).toBeNull();
+    });
+
+    it("still wants a first upgrader under the colonize doctrine, to hold off controller decay", () => {
+      const state = baseState({
+        creepCounts: { harvester: 2, upgrader: 0, builder: 0, hauler: 0, miner: 0 },
+        controllerLevel: 6,
+        doctrine: "colonize"
+      });
+
+      expect(decideNextSpawn(state)?.role).toBe("upgrader");
+    });
+
+    it("leaves the upgrader target alone under the default econ doctrine", () => {
+      const state = baseState({
+        creepCounts: { harvester: 2, upgrader: 1, builder: 0, hauler: 0, miner: 0 },
+        controllerLevel: 6,
+        doctrine: "econ"
+      });
+
+      expect(decideNextSpawn(state)?.role).toBe("upgrader");
+    });
   });
 
   it("scales the builder target with construction site count, capped", () => {
@@ -510,6 +543,17 @@ describe("hasUnmetLocalNeed", () => {
     });
 
     expect(hasUnmetLocalNeed(state)).toBe(true);
+  });
+
+  it("is false under the colonize doctrine once the single capped upgrader slot is filled, even far short of the econ target", () => {
+    const state = baseState({
+      sourcesWithoutContainerCount: 0,
+      controllerLevel: 6, // econ target would be 4, still 3 short at upgrader: 1
+      creepCounts: { harvester: 0, upgrader: 1, builder: 0, hauler: 0, miner: 0 },
+      doctrine: "colonize"
+    });
+
+    expect(hasUnmetLocalNeed(state)).toBe(false);
   });
 
   it("is unaffected by defender/hostile state in either direction - a missing defender never blocks remote spawning", () => {
@@ -1068,6 +1112,27 @@ describe("runSpawning", () => {
     const spawn = mockSpawn(false);
 
     runSpawning(spawn, mockRoom({ containers: 1 }));
+
+    expect(spawn.spawnCreep).not.toHaveBeenCalled();
+  });
+
+  it("wires Memory.rooms[room].doctrine into the upgrader target, capping it at 1 under colonize", () => {
+    vi.stubGlobal("Game", {
+      time: 12345,
+      map: { describeExits: vi.fn().mockReturnValue({}) },
+      creeps: {
+        h1: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        h2: { room: { name: "W1N1" }, memory: { role: "harvester", working: false } },
+        u1: { room: { name: "W1N1" }, memory: { role: "upgrader", working: false } }
+      }
+    });
+    vi.stubGlobal("Memory", { rooms: { W1N1: { doctrine: "colonize" } } });
+    const spawn = mockSpawn(false);
+
+    // controllerLevel 3 would want a 4th upgrader under the default econ doctrine (see
+    // "wires the room's actual controller level into the upgrader target" above) - under
+    // colonize, the target is capped at 1, already met by u1, so nothing spawns.
+    runSpawning(spawn, mockRoom({ controllerLevel: 3 }));
 
     expect(spawn.spawnCreep).not.toHaveBeenCalled();
   });

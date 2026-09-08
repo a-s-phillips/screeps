@@ -21,6 +21,7 @@ export interface RoomState {
   controllerLevel: number;
   hostileCreepCount: number;
   hostileRecentlySeen: boolean;
+  doctrine: Doctrine;
 }
 
 // Live-capped so a swarm doesn't queue an unbounded number of defenders.
@@ -39,9 +40,17 @@ const UPGRADER_TARGET_CAP = 4;
 // meets or exceeds that alone, so more upgraders past that point are wasted spawns.
 const CONTROLLER_UPGRADE_POWER_CAP_LEVEL = 8;
 
+// Under the "colonize" doctrine, one upgrader is kept (same floor as the RCL8 power
+// cap above) purely to hold off controller decay - the rest of the room's spawn turns
+// and energy are freed for whatever remote/colonizer push is in flight instead of
+// grinding RCL. See RoomMemory.doctrine.
+const UPGRADER_COLONIZE_DOCTRINE_TARGET_CAP = 1;
+
 function upgraderTargetFor(state: RoomState): number {
   if (state.controllerLevel >= CONTROLLER_UPGRADE_POWER_CAP_LEVEL) return 1;
-  return Math.min(state.controllerLevel + 1, UPGRADER_TARGET_CAP);
+  const cap =
+    state.doctrine === "colonize" ? UPGRADER_COLONIZE_DOCTRINE_TARGET_CAP : UPGRADER_TARGET_CAP;
+  return Math.min(state.controllerLevel + 1, cap);
 }
 
 // Scales with actual queue depth instead of a flat "any sites? then 2" gate, capped so
@@ -176,10 +185,11 @@ export function decideNextSpawn(state: RoomState): SpawnDecision | null {
     // upgrader deficit, not just a severe one, fills the gap with whatever's on hand
     // instead of waiting on a tick that structurally can't arrive.
     //
-    // This is a candidate for the "doctrine" toggle described in secondbrain (see the
-    // 2026-09-06 note) - right now downsizing always wins, but a future "expansion"
-    // doctrine might want the cap reinstated so upgrader deficits leave more room for
-    // remote spawning again.
+    // The "colonize" doctrine (see RoomMemory.doctrine) addresses the same underlying
+    // tradeoff from the other side - it lowers the upgrader *target* itself via
+    // upgraderTargetFor, rather than reinstating a body-sizing cap here. Left as
+    // always-downsize regardless of doctrine: once a deficit exists against whatever
+    // the current target is, filling it with the best affordable body is still correct.
     const severelyUnderTarget = role === "upgrader" ? deficit > 0 : deficit > 1;
     return hasWorkingEconomy && !severelyUnderTarget
       ? state.energyCapacityAvailable
@@ -350,7 +360,8 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     hostileRecentlySeen: isLocalHostileRecentlySeen(
       Memory.rooms[room.name]?.lastHostileSeenTick,
       Game.time
-    )
+    ),
+    doctrine: Memory.rooms[room.name]?.doctrine ?? "econ"
   };
 
   const excessHarvesters = creepCounts.harvester - harvesterTargetFor(state);

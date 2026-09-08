@@ -13,6 +13,9 @@ declare global {
     | "keeperHarvester"
     | "colonizer";
 
+  // See RoomMemory.doctrine below for what each mode does.
+  type Doctrine = "econ" | "colonize";
+
   interface CreepMemory {
     role: CreepRole;
     working: boolean;
@@ -62,6 +65,13 @@ declare global {
     // remoteRooms, that room's reserver claims it instead of reserving, once GCL allows -
     // see reserver.ts.
     claimTarget?: string;
+    // Manual strategic-mode toggle (see [[Screeps bot: doctrines - dynamic behavior
+    // toggles]] in secondbrain) - unset/"econ" is today's default (grind RCL, upgrader
+    // spawns at full target). "colonize" throttles the upgrader target down (see
+    // upgraderTargetFor in spawnManager.ts) so more spawn turns and energy go to
+    // whatever remote/colonizer work is in flight instead. A live Memory edit, not a
+    // code change - flip it and back without a redeploy.
+    doctrine?: Doctrine;
   }
 }
 
