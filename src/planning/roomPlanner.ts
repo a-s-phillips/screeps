@@ -12,7 +12,14 @@ import { findTowerSite } from "./towerPlanner";
 // Ticks a hostile sighting keeps the tower/rampart-priority gate open after last seen - tune freely.
 export const HOSTILE_MEMORY_WINDOW = 1000;
 // Flip to true (and redeploy) to force tower/rampart construction now, bypassing the gates below.
-export const TOWER_PRIORITY_OVERRIDE = false;
+// Flipped on 2026-09-08: W57N24 just took a real two-skirmisher assault from ender2012 and
+// currently has zero defensive structures - waiting for its road queue to empty, or for
+// another hostile sighting to reopen the gate reactively, would mean any rampart construction
+// site starts from 0 hit points exactly when an attack is already underway, too late to help.
+// Building it now, ahead of the next attack, is the point. No-op for W57N25 (already at its
+// RCL5 tower/rampart caps) - only changes behavior for W57N24. Flip back to false once W57N24's
+// ramparts are built out, to let its road/extension queue reclaim priority.
+export const TOWER_PRIORITY_OVERRIDE = true;
 
 // Shared by tower priority, rampart priority, and (in spawnManager.ts) the defender
 // spawn trigger - one source of truth for "is this room's hostile sighting still

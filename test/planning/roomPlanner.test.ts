@@ -527,10 +527,15 @@ describe("planRoom", () => {
       );
     });
 
+    // These three "gate closed" cases call planTowers directly with overridePriority
+    // explicitly false, rather than going through planRoom - TOWER_PRIORITY_OVERRIDE is a
+    // live deliberate on/off switch (see its own comment), so a test asserting gate-closed
+    // behavior can't rely on the module constant's current value without breaking every
+    // time that switch gets flipped for real deployment reasons.
     it("does not place a tower while extensions still need building", () => {
       const room = mockRoom({ level: 3 });
 
-      planRoom(room, { roadPlan: [] });
+      planTowers(room, false, false, false);
 
       expect(room.createConstructionSite).not.toHaveBeenCalledWith(
         expect.any(Number),
@@ -542,7 +547,7 @@ describe("planRoom", () => {
     it("does not place a tower while roads still need building", () => {
       const room = mockRoom({ level: 3, existingExtensions: extensionsAtCap });
 
-      planRoom(room, { roadPlan: [{ x: 1, y: 1 }] });
+      planTowers(room, false, false, false);
 
       expect(room.createConstructionSite).not.toHaveBeenCalledWith(
         expect.any(Number),
@@ -581,10 +586,10 @@ describe("planRoom", () => {
     });
 
     it("does not place a tower when the last hostile sighting is outside the memory window", () => {
-      vi.stubGlobal("Game", { time: 5000 });
       const room = mockRoom({ level: 3 });
+      const hostileRecentlySeen = isLocalHostileRecentlySeen(200, 5000);
 
-      planRoom(room, { roadPlan: [{ x: 1, y: 1 }], lastHostileSeenTick: 200 });
+      planTowers(room, hostileRecentlySeen, false, false);
 
       expect(room.createConstructionSite).not.toHaveBeenCalledWith(
         expect.any(Number),
@@ -737,10 +742,13 @@ describe("planRoom", () => {
       );
     });
 
+    // Same rationale as the tower "gate closed" cases above: call planRamparts directly
+    // with overridePriority explicitly false instead of going through planRoom, since
+    // TOWER_PRIORITY_OVERRIDE is a live deliberate switch, not a fixed test fixture.
     it("does not place a rampart while extensions still need building", () => {
       const room = mockRoom({ level: 3 });
 
-      planRoom(room, { roadPlan: [] });
+      planRamparts(room, false, false, false);
 
       expect(room.createConstructionSite).not.toHaveBeenCalledWith(
         expect.any(Number),
@@ -752,7 +760,7 @@ describe("planRoom", () => {
     it("does not place a rampart while roads still need building", () => {
       const room = mockRoom({ level: 3, existingExtensions: extensionsAtCap });
 
-      planRoom(room, { roadPlan: [{ x: 1, y: 1 }] });
+      planRamparts(room, false, false, false);
 
       expect(room.createConstructionSite).not.toHaveBeenCalledWith(
         expect.any(Number),
@@ -775,10 +783,10 @@ describe("planRoom", () => {
     });
 
     it("does not place a rampart when the last hostile sighting is outside the memory window", () => {
-      vi.stubGlobal("Game", { time: 5000 });
       const room = mockRoom({ level: 3 });
+      const hostileRecentlySeen = isLocalHostileRecentlySeen(200, 5000);
 
-      planRoom(room, { roadPlan: [{ x: 1, y: 1 }], lastHostileSeenTick: 200 });
+      planRamparts(room, hostileRecentlySeen, false, false);
 
       expect(room.createConstructionSite).not.toHaveBeenCalledWith(
         expect.any(Number),
