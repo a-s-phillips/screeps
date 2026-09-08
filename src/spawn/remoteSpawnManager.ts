@@ -97,6 +97,7 @@ export interface RemoteRoomState {
   reserverCount: number;
   ourReserverClaimParts: number;
   hostileReservationClaimParts: number;
+  hostileCombatCreepCount: number;
   remoteHarvesterCount: number;
   remoteHaulerCount: number;
   sourcesWithoutContainerCount: number;
@@ -126,6 +127,23 @@ function countHostileReservationClaimParts(remoteRoomName: string): number {
     (sum, hostile) => sum + countActiveClaimParts(hostile.body),
     0
   );
+}
+
+// A creep with no live ATTACK or RANGED_ATTACK part can't hurt a defender - counting it
+// toward the defender target would waste spawns matching numbers against, say, a rival's
+// unarmed remoteHarvester or reserver rather than the actual threat.
+function hasActiveCombatPart(body: BodyPartDefinition[]): boolean {
+  return body.some((part) => (part.type === ATTACK || part.type === RANGED_ATTACK) && part.hits > 0);
+}
+
+// Same "requires live vision, defaults to 0" convention as countHostileReservationClaimParts.
+function countHostileCombatCreeps(remoteRoomName: string): number {
+  const remoteRoom = Game.rooms[remoteRoomName];
+  if (!remoteRoom) return 0;
+
+  return getCachedFind(remoteRoom, FIND_HOSTILE_CREEPS).filter((hostile) =>
+    hasActiveCombatPart(hostile.body)
+  ).length;
 }
 
 // Sources/containers require live vision into the remote room (only present while the
@@ -207,6 +225,7 @@ export function buildRemoteRoomState(homeRoom: Room, remoteRoomName: string): Re
     reserverCount,
     ourReserverClaimParts,
     hostileReservationClaimParts: countHostileReservationClaimParts(remoteRoomName),
+    hostileCombatCreepCount: countHostileCombatCreeps(remoteRoomName),
     remoteHarvesterCount,
     remoteHaulerCount,
     ...buildRemoteSourceState(remoteRoomName, minerSourceIds),
@@ -275,11 +294,21 @@ function decideColonizerSpawn(state: RemoteRoomState): SpawnDecision | null {
   };
 }
 
-// One defender is plenty against ender2012's historically unarmed CLAIM+MOVE presence -
-// defender.ts's plain "attack nearest hostile" doesn't need CLAIM-part scaling the way
-// reserver does, just a body capable of killing a bare CLAIM+MOVE creep (200 HP, no
-// defense of its own).
-const REMOTE_DEFENDER_TARGET = 1;
+// A flat target of 1 assumed ender2012's historically unarmed CLAIM+MOVE presence - that
+// assumption broke live: W57N24 took a two-skirmisher assault (4 TOUGH/12 MOVE/8 ATTACK,
+// 2400 HP each), which a single max-body defender (13 ATTACK/13 MOVE at 1800 capacity,
+// 1300 HP, 390 DPS) loses even 1-on-1 (390 DPS needs 6.15 ticks to kill a 2400 HP
+// skirmisher; 240 incoming DPS kills our defender in 5.4). Scaling to the live combat
+// headcount, same "rival's count + 1" margin MAX_RESERVER_CLAIM_PARTS's comment explains
+// for reservation contests, guarantees an actual numbers advantage rather than parity -
+// at 3-on-2 our combined DPS (1170) kills one skirmisher in ~2 ticks before either side
+// takes a serious loss, then mops up the second at 2-on-1. Capped so an escalating rival
+// can't turn this into an unbounded spawn sink, same rationale as MAX_RESERVER_CLAIM_PARTS.
+const REMOTE_DEFENDER_TARGET_CAP = 4;
+
+function remoteDefenderTargetFor(state: RemoteRoomState): number {
+  return Math.min(state.hostileCombatCreepCount + 1, REMOTE_DEFENDER_TARGET_CAP);
+}
 
 function countLiveRemoteDefenders(remoteRoomName: string): number {
   let count = 0;
@@ -307,7 +336,7 @@ function decideRemoteDefenderSpawn(state: RemoteRoomState): SpawnDecision | null
   const isOwned = Game.rooms[state.remoteRoomName]?.controller?.my ?? false;
   if (!isOwned && !isClaimWindowApproaching()) return null;
 
-  if (countLiveRemoteDefenders(state.remoteRoomName) >= REMOTE_DEFENDER_TARGET) return null;
+  if (countLiveRemoteDefenders(state.remoteRoomName) >= remoteDefenderTargetFor(state)) return null;
 
   const body = planBody("defender", state.energyCapacityAvailable);
   if (body.length === 0 || bodyCost(body) > state.energyAvailable) return null;
@@ -343,35 +372,45 @@ export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | n
 
   if (state.hostileRecentlySeen) return null;
 
-  // "Enough reserver" isn't a headcount, it's a CLAIM-part tally: attackController and
-  // reserveController both move a controller's reservation endTime by 1 tick per CLAIM
-  // part per tick, symmetric for whoever's contesting it, so a rival fielding more CLAIM
-  // parts than our lone reserver simply out-reserves it forever no matter how long it
-  // sits there (found live in W57N24 - a 1-CLAIM reserver never even dented a 2-CLAIM
-  // rival's reservation). Sizing to exactly one more than the rival's current CLAIM count
-  // is the minimum body that actually reverses the reservation's direction instead of just
-  // slowing its growth - but only up to MAX_RESERVER_CLAIM_PARTS (see its own comment):
-  // an escalating rival must not turn this into an unbounded energy sink.
-  const neededClaimParts = state.hostileReservationClaimParts + 1;
-  const targetClaimParts = Math.min(neededClaimParts, MAX_RESERVER_CLAIM_PARTS);
-  if (state.ourReserverClaimParts < targetClaimParts) {
-    const body = planReserverBody(targetClaimParts - state.ourReserverClaimParts);
-    if (bodyCost(body) <= state.energyAvailable) {
-      return {
-        role: "reserver",
-        body,
-        memory: { homeRoom: state.homeRoomName, remoteRoom: state.remoteRoomName }
-      };
+  // A room we already own has no reservation to contest - reserveController/
+  // attackController against our own controller is a no-op at best (reserver.ts's own
+  // `if (controller.my) return;` guard) and this block would otherwise keep sizing a
+  // reserver body against a rival's CLAIM part count forever, purely because a hostile
+  // reserver happens to be standing in the room. That would compete with the colonizer
+  // (below) for every spawn slot once the room is cleared - exactly the resource this
+  // room most needs directed at finishing its first spawn instead.
+  const isOwnedByUs = Game.rooms[state.remoteRoomName]?.controller?.my ?? false;
+  if (!isOwnedByUs) {
+    // "Enough reserver" isn't a headcount, it's a CLAIM-part tally: attackController and
+    // reserveController both move a controller's reservation endTime by 1 tick per CLAIM
+    // part per tick, symmetric for whoever's contesting it, so a rival fielding more CLAIM
+    // parts than our lone reserver simply out-reserves it forever no matter how long it
+    // sits there (found live in W57N24 - a 1-CLAIM reserver never even dented a 2-CLAIM
+    // rival's reservation). Sizing to exactly one more than the rival's current CLAIM count
+    // is the minimum body that actually reverses the reservation's direction instead of just
+    // slowing its growth - but only up to MAX_RESERVER_CLAIM_PARTS (see its own comment):
+    // an escalating rival must not turn this into an unbounded energy sink.
+    const neededClaimParts = state.hostileReservationClaimParts + 1;
+    const targetClaimParts = Math.min(neededClaimParts, MAX_RESERVER_CLAIM_PARTS);
+    if (state.ourReserverClaimParts < targetClaimParts) {
+      const body = planReserverBody(targetClaimParts - state.ourReserverClaimParts);
+      if (bodyCost(body) <= state.energyAvailable) {
+        return {
+          role: "reserver",
+          body,
+          memory: { homeRoom: state.homeRoomName, remoteRoom: state.remoteRoomName }
+        };
+      }
+      // Only hard-block behind an unaffordable reinforcement when there's no reserver
+      // presence at all - vision/reservation has to come from somewhere first. An
+      // established room that already has a reserver out there but just can't afford (or
+      // has capped out) its next top-up shouldn't have miner/remoteHarvester/remoteHauler
+      // starved behind a reservation fight it's already chosen not to keep escalating -
+      // found live: W57N24's contest alone drove 241 reserver spawns over ~174k ticks
+      // while remoteHauler sat at zero population 63% of that time, because this used to
+      // return null unconditionally here regardless of whether a reserver already existed.
+      if (state.reserverCount === 0) return null;
     }
-    // Only hard-block behind an unaffordable reinforcement when there's no reserver
-    // presence at all - vision/reservation has to come from somewhere first. An
-    // established room that already has a reserver out there but just can't afford (or
-    // has capped out) its next top-up shouldn't have miner/remoteHarvester/remoteHauler
-    // starved behind a reservation fight it's already chosen not to keep escalating -
-    // found live: W57N24's contest alone drove 241 reserver spawns over ~174k ticks
-    // while remoteHauler sat at zero population 63% of that time, because this used to
-    // return null unconditionally here regardless of whether a reserver already existed.
-    if (state.reserverCount === 0) return null;
   }
 
   const colonizerDecision = decideColonizerSpawn(state);

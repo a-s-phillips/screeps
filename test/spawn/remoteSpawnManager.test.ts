@@ -333,6 +333,7 @@ function baseRemoteState(overrides: Partial<RemoteRoomState> = {}): RemoteRoomSt
     // ourReserverClaimParts/hostileReservationClaimParts explicitly instead.
     ourReserverClaimParts: overrides.ourReserverClaimParts ?? overrides.reserverCount ?? 0,
     hostileReservationClaimParts: 0,
+    hostileCombatCreepCount: 0,
     remoteHarvesterCount: 0,
     remoteHaulerCount: 0,
     sourcesWithoutContainerCount: 0,
@@ -600,6 +601,30 @@ describe("decideNextRemoteSpawn", () => {
     );
 
     expect(decision).toBeNull();
+  });
+
+  // Regression coverage: reserveController/attackController against a controller we
+  // already own is meaningless (reserver.ts's own `if (controller.my) return;` guard),
+  // but a hostile reserver merely standing in an owned remote room still has a live CLAIM
+  // part - without this guard, hostileReservationClaimParts stays nonzero forever and
+  // this block keeps trying to out-escalate a reservation contest that doesn't exist,
+  // starving the colonizer (which is what actually needs the spawn slot) of every cycle.
+  it("does not spawn a reserver against a remote room we already own, even with a hostile reserver present", () => {
+    vi.stubGlobal("Game", {
+      rooms: { W8N8: mockClaimedRemoteRoom({ name: "W8N8" }) },
+      creeps: {}
+    });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 0,
+        ourReserverClaimParts: 0,
+        hostileReservationClaimParts: 2
+      })
+    );
+
+    expect(decision?.role).toBe("colonizer");
+    vi.unstubAllGlobals();
   });
 });
 
@@ -924,6 +949,72 @@ describe("decideNextRemoteSpawn > remote defender", () => {
 
     expect(decision).toBeNull();
   });
+
+  it("scales the defender target above 1 to outnumber multiple live hostile combat creeps", () => {
+    // Two live hostile combat creeps -> target 3 (rival count + 1, see
+    // remoteDefenderTargetFor's comment). Two defenders already live is still under
+    // target, so a third gets dispatched.
+    vi.stubGlobal("Game", {
+      gcl: { level: 1, progress: 999999, progressTotal: 1000000 },
+      rooms: { W9N8: { controller: { my: true } } },
+      creeps: {
+        defender_1: { memory: { role: "defender", remoteRoom: "W8N8" } },
+        defender_2: { memory: { role: "defender", remoteRoom: "W8N8" } }
+      }
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W8N8" } } });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, hostileCombatCreepCount: 2 })
+    );
+
+    expect(decision?.role).toBe("defender");
+  });
+
+  it("stops dispatching once the scaled target is met", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1, progress: 999999, progressTotal: 1000000 },
+      rooms: { W9N8: { controller: { my: true } } },
+      creeps: {
+        defender_1: { memory: { role: "defender", remoteRoom: "W8N8" } },
+        defender_2: { memory: { role: "defender", remoteRoom: "W8N8" } },
+        defender_3: { memory: { role: "defender", remoteRoom: "W8N8" } },
+        colonizer_1: { memory: { role: "colonizer", remoteRoom: "W8N8" } }
+      }
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W8N8" } } });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, hostileCombatCreepCount: 2, sourcesWithoutContainerCount: 0 })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  it("caps the scaled target even against an overwhelming hostile force", () => {
+    vi.stubGlobal("Game", {
+      gcl: { level: 1, progress: 999999, progressTotal: 1000000 },
+      rooms: { W9N8: { controller: { my: true } } },
+      creeps: {
+        defender_1: { memory: { role: "defender", remoteRoom: "W8N8" } },
+        defender_2: { memory: { role: "defender", remoteRoom: "W8N8" } },
+        defender_3: { memory: { role: "defender", remoteRoom: "W8N8" } },
+        defender_4: { memory: { role: "defender", remoteRoom: "W8N8" } },
+        colonizer_1: { memory: { role: "colonizer", remoteRoom: "W8N8" } }
+      }
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { claimTarget: "W8N8" } } });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        hostileCombatCreepCount: 20,
+        sourcesWithoutContainerCount: 0
+      })
+    );
+
+    expect(decision).toBeNull();
+  });
 });
 
 function mockVisibleRemoteRoom(opts: {
@@ -931,15 +1022,20 @@ function mockVisibleRemoteRoom(opts: {
   sources?: { id: string; pos: { x: number; y: number } }[];
   containers?: { id: string; pos: { x: number; y: number } }[];
   hostileClaimParts?: number[];
+  hostileBodies?: BodyPartConstant[][];
 }) {
   const sources = opts.sources ?? [];
   const containers = (opts.containers ?? []).map((c) => ({
     ...c,
     structureType: STRUCTURE_CONTAINER
   }));
-  const hostiles = (opts.hostileClaimParts ?? []).map((claimParts) => ({
+  const claimHostiles = (opts.hostileClaimParts ?? []).map((claimParts) => ({
     body: Array.from({ length: claimParts }, () => ({ type: CLAIM, hits: 100 }))
   }));
+  const bodyHostiles = (opts.hostileBodies ?? []).map((body) => ({
+    body: body.map((type) => ({ type, hits: 100 }))
+  }));
+  const hostiles = [...claimHostiles, ...bodyHostiles];
 
   return {
     name: opts.name,
@@ -1058,6 +1154,45 @@ describe("buildRemoteRoomState", () => {
     const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
 
     expect(state.hostileReservationClaimParts).toBe(0);
+  });
+
+  it("counts hostile creeps carrying a live ATTACK or RANGED_ATTACK part as combat creeps", () => {
+    const remoteRoom = mockVisibleRemoteRoom({
+      name: "W8N8",
+      hostileBodies: [
+        [TOUGH, TOUGH, MOVE, MOVE, ATTACK],
+        [MOVE, RANGED_ATTACK]
+      ]
+    });
+    vi.stubGlobal("Game", { time: 1000, creeps: {}, rooms: { W8N8: remoteRoom } });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.hostileCombatCreepCount).toBe(2);
+  });
+
+  it("excludes unarmed hostile creeps (e.g. a bare reserver or remoteHarvester) from the combat count", () => {
+    const remoteRoom = mockVisibleRemoteRoom({
+      name: "W8N8",
+      hostileClaimParts: [1],
+      hostileBodies: [[WORK, CARRY, MOVE]]
+    });
+    vi.stubGlobal("Game", { time: 1000, creeps: {}, rooms: { W8N8: remoteRoom } });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.hostileCombatCreepCount).toBe(0);
+  });
+
+  it("defaults hostileCombatCreepCount to zero when the remote room isn't visible", () => {
+    vi.stubGlobal("Game", { time: 1000, creeps: {}, rooms: {} });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const state = buildRemoteRoomState(mockRoom("W9N8"), "W8N8");
+
+    expect(state.hostileCombatCreepCount).toBe(0);
   });
 
   it("reports a recently-seen hostile within the remote-room recency window", () => {
