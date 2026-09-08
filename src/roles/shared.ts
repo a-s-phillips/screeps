@@ -2,7 +2,15 @@ import { isRoomHostile, isRoomOwnedByOther } from "../planning/remoteTargeting";
 import { chebyshevDistance } from "../utils/grid";
 import { getCachedFind } from "../utils/roomCache";
 
-export const MOVE_OPTS: MoveToOpts = { reusePath: 5 };
+// maxRooms: 1 - every caller uses this once a creep is already in the room it needs to
+// act in (chase a hostile, walk to a container/controller/spawn); crossing rooms is
+// travelToRoom/REMOTE_MOVE_OPTS's job, never this one's. Without the cap, the pathfinder
+// is free to route through a neighboring room if that looks cheaper (e.g. a chokepoint
+// right at a border), which can send a creep back out the way it came - found live: a
+// remote defender freshly arrived in a claim-target room ping-ponged across the border
+// back into the home room and immediately back in, forever, because travelToRoom has no
+// memory of "already arrived" and re-fires the moment creep.room.name flips back.
+export const MOVE_OPTS: MoveToOpts = { reusePath: 5, maxRooms: 1 };
 // Cross-room trips are long and mostly unroaded/static terrain, so a much longer path
 // cache is worth it - a local reusePath of 5 would recompute the whole route far more
 // often than the terrain along the way ever actually changes.

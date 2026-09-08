@@ -1039,3 +1039,14 @@ describe("travelToRoom", () => {
     );
   });
 });
+
+describe("MOVE_OPTS", () => {
+  it("caps pathfinding to a single room, since every caller is already in the room it needs to act in", () => {
+    // Found live: a remote defender with no maxRooms cap could path a chase/approach
+    // move back out through a neighboring room's border if that looked cheaper, then
+    // travelToRoom immediately sent it back in on the very next tick - an unbounded
+    // ping-pong across the border with no state remembering "already arrived". Crossing
+    // rooms is travelToRoom/REMOTE_MOVE_OPTS's job, never this one's.
+    expect(MOVE_OPTS.maxRooms).toBe(1);
+  });
+});
