@@ -469,6 +469,39 @@ describe("decideNextRemoteSpawn", () => {
     expect(decision).toBeNull();
   });
 
+  it("proceeds past a recent hostile sighting once live defenders already meet the scaled target", () => {
+    // hostileCombatCreepCount 0 -> scaled target 1 (see remoteDefenderTargetFor) - one
+    // live defender already meets it, so the escort is established even though the
+    // sighting itself is still within the 200-tick memory window.
+    vi.stubGlobal("Game", {
+      rooms: {},
+      creeps: { defender_1: { memory: { role: "defender", remoteRoom: "W8N8" } } }
+    });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ hostileRecentlySeen: true, hostileCombatCreepCount: 0 })
+    );
+
+    expect(decision?.role).toBe("reserver");
+    vi.unstubAllGlobals();
+  });
+
+  it("still blocks a recent sighting when live defenders haven't caught up to the scaled target yet", () => {
+    // hostileCombatCreepCount 2 -> scaled target 3 - only 1 live defender is short of an
+    // established escort, so the blackout still applies in full.
+    vi.stubGlobal("Game", {
+      rooms: {},
+      creeps: { defender_1: { memory: { role: "defender", remoteRoom: "W8N8" } } }
+    });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ hostileRecentlySeen: true, hostileCombatCreepCount: 2 })
+    );
+
+    expect(decision).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
   it("returns null when the remote room is owned by another player, even with no reserver", () => {
     const decision = decideNextRemoteSpawn(baseRemoteState({ ownedByOther: true }));
 
@@ -821,6 +854,23 @@ describe("decideNextRemoteSpawn > colonizer", () => {
     );
 
     expect(decision).toBeNull();
+  });
+
+  it("dispatches a colonizer to a claimed, spawnless room despite a recent sighting once a defender is already escorting it", () => {
+    // A rival that pings the room roughly every 190 ticks would otherwise keep
+    // hostileRecentlySeen permanently true and stall the spawn build forever - an
+    // already-established escort (live defender count meeting the scaled target, see
+    // remoteRoomIsDefended) lifts the blackout instead of waiting out the full window.
+    vi.stubGlobal("Game", {
+      rooms: { W8N8: mockClaimedRemoteRoom({ name: "W8N8" }) },
+      creeps: { defender_1: { memory: { role: "defender", remoteRoom: "W8N8" } } }
+    });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({ reserverCount: 1, hostileRecentlySeen: true, hostileCombatCreepCount: 0 })
+    );
+
+    expect(decision?.role).toBe("colonizer");
   });
 });
 

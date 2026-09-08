@@ -322,6 +322,19 @@ function countLiveRemoteDefenders(remoteRoomName: string): number {
   return count;
 }
 
+// A flat 200-tick blackout after any sighting (see decideNextRemoteSpawn's
+// hostileRecentlySeen gate) has a real exploit: a rival only needs to ping the room with
+// one cheap creep roughly every 190 ticks to keep economy spawning permanently stalled,
+// without ever risking a fight against our standing defenders. Once live defender
+// headcount already meets remoteDefenderTargetFor's own scaled target, further economy
+// creeps have an escort capable of protecting them, so the blackout no longer needs to
+// apply - "station defenders first, then send non-combat creeps" rather than "wait out a
+// timer no matter what's actually standing guard".
+function remoteRoomIsDefended(state: RemoteRoomState): boolean {
+  const liveDefenderCount = countLiveRemoteDefenders(state.remoteRoomName);
+  return liveDefenderCount > 0 && liveDefenderCount >= remoteDefenderTargetFor(state);
+}
+
 // Once owned, maintained unconditionally (no isClaimWindowApproaching or spawn-exists
 // off-switch the way decideColonizerSpawn's post-claim branch has) - the goal is
 // sustained control over "a large sustained period of ticks", not just surviving the
@@ -373,7 +386,12 @@ export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | n
   const defenderDecision = decideRemoteDefenderSpawn(state);
   if (defenderDecision) return defenderDecision;
 
-  if (state.hostileRecentlySeen) return null;
+  // The blackout lifts early once defenders already stationed there meet the scaled
+  // target (see remoteRoomIsDefended) - an escort that can already handle the live
+  // threat makes waiting out the rest of the 200-tick memory window pure lost economy,
+  // not caution. Still applies in full while defenders are short of that target (e.g.
+  // freshly dispatched, still traveling, or a genuinely escalating fight), same as before.
+  if (state.hostileRecentlySeen && !remoteRoomIsDefended(state)) return null;
 
   // A room we already own has no reservation to contest - reserveController/
   // attackController against our own controller is a no-op at best (reserver.ts's own
