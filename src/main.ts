@@ -11,6 +11,7 @@ import { recordRemoteIntel } from "./planning/remoteTargeting";
 import { planRoom } from "./planning/roomPlanner";
 import { run as runBuilder } from "./roles/builder";
 import { run as runColonizer } from "./roles/colonizer";
+import { run as runCourier } from "./roles/courier";
 import { run as runDefender } from "./roles/defender";
 import { run as runHarvester } from "./roles/harvester";
 import { run as runHauler } from "./roles/hauler";
@@ -37,7 +38,8 @@ const roleRunners: Record<CreepRole, (creep: Creep) => void> = {
   remoteHauler: runRemoteHauler,
   defender: runDefender,
   keeperHarvester: runKeeperHarvester,
-  colonizer: runColonizer
+  colonizer: runColonizer,
+  courier: runCourier
 };
 
 let seenHostileIds = new Set<string>();

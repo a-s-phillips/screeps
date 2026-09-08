@@ -322,6 +322,59 @@ function countLiveRemoteDefenders(remoteRoomName: string): number {
   return count;
 }
 
+// v1 flat cap, same "start simple" convention as COLONIZER_TARGET - a single courier's
+// round trip is unmeasured for any real pairing yet, so there's nothing to size a
+// throughput target against (contrast remoteHaulerTarget, which has an actual measured
+// round-trip estimate to work from).
+const COURIER_TARGET = 1;
+
+// Keeps the donor room's own spawn/repair buffer untouched rather than draining its
+// storage to zero the moment a sibling room dips below its own capacity - a donor's own
+// economy always gets first claim on its own storage.
+const COURIER_DONOR_RESERVE = 5000;
+
+function countLiveCouriers(homeRoomName: string, remoteRoomName: string): number {
+  let count = 0;
+  for (const name in Game.creeps) {
+    const creep = Game.creeps[name];
+    if (
+      creep.memory.role === "courier" &&
+      creep.memory.homeRoom === homeRoomName &&
+      creep.memory.remoteRoom === remoteRoomName
+    ) {
+      count++;
+    }
+  }
+  return count;
+}
+
+// Ferries surplus energy from a home room's storage to a sibling room it colonized (see
+// remoteRooms/claimTarget - the same relationship that got the sibling claimed in the
+// first place, reused here rather than inventing new memory for it). Only reachable via
+// the isOwnedByUs branch below, i.e. only once the sibling has its own spawn and the
+// local pipeline (spawnManager.ts) is already running its economy - a courier tops that
+// economy up, it doesn't replace it. A source-poor sibling (W57N24: one source, capped
+// forever) benefits from a mature donor's (W57N25) storage surplus in a way its own
+// economy can never catch up to on its own.
+function decideCourierSpawn(state: RemoteRoomState): SpawnDecision | null {
+  const homeRoom = Game.rooms[state.homeRoomName];
+  const remoteRoom = Game.rooms[state.remoteRoomName];
+  if (!homeRoom?.storage || !remoteRoom) return null;
+
+  if (homeRoom.storage.store.getUsedCapacity(RESOURCE_ENERGY) <= COURIER_DONOR_RESERVE) return null;
+  if (remoteRoom.energyAvailable >= remoteRoom.energyCapacityAvailable) return null;
+  if (countLiveCouriers(state.homeRoomName, state.remoteRoomName) >= COURIER_TARGET) return null;
+
+  const body = planBody("courier", state.energyCapacityAvailable);
+  if (body.length === 0 || bodyCost(body) > state.energyAvailable) return null;
+
+  return {
+    role: "courier",
+    body,
+    memory: { homeRoom: state.homeRoomName, remoteRoom: state.remoteRoomName }
+  };
+}
+
 // A flat 200-tick blackout after any sighting (see decideNextRemoteSpawn's
 // hostileRecentlySeen gate) has a real exploit: a rival only needs to ping the room with
 // one cheap creep roughly every 190 ticks to keep economy spawning permanently stalled,
@@ -445,10 +498,15 @@ export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | n
   // spawn (and local haulers) came online, because remoteRooms/claimTarget are deliberately
   // left pointing at it forever (see decideRemoteDefenderSpawn's comment on why the
   // defender above must NOT stand down post-claim) - nothing analogous should apply to the
-  // economy roles below, which the local pipeline has already taken over.
+  // economy roles below, which the local pipeline has already taken over. That same
+  // permanent pointer is put to a second use here instead of just being dead weight past
+  // this point: a courier (see decideCourierSpawn) tops up the sibling's own economy from
+  // this room's storage surplus, rather than the slot going fully idle.
   if (isOwnedByUs) {
     const remoteRoom = Game.rooms[state.remoteRoomName];
-    if (remoteRoom && getCachedFind(remoteRoom, FIND_MY_SPAWNS).length > 0) return null;
+    if (remoteRoom && getCachedFind(remoteRoom, FIND_MY_SPAWNS).length > 0) {
+      return decideCourierSpawn(state);
+    }
   }
 
   if (state.sourcesNeedingMiner.length > 0) {

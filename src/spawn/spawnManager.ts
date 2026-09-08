@@ -252,7 +252,8 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     remoteHauler: 0,
     keeperHarvester: 0,
     defender: 0,
-    colonizer: 0
+    colonizer: 0,
+    courier: 0
   };
   const harvesterCreeps: Creep[] = [];
   // Tracks the healthiest (highest ticksToLive) miner currently assigned to each

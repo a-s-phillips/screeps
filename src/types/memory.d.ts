@@ -11,7 +11,8 @@ declare global {
     | "remoteHauler"
     | "defender"
     | "keeperHarvester"
-    | "colonizer";
+    | "colonizer"
+    | "courier";
 
   // See RoomMemory.doctrine below for what each mode does.
   type Doctrine = "econ" | "colonize";

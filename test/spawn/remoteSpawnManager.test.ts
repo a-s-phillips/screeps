@@ -902,6 +902,102 @@ describe("decideNextRemoteSpawn > colonizer", () => {
   });
 });
 
+function mockOwnedSiblingRoom(opts: { energyAvailable: number; energyCapacityAvailable: number }) {
+  return {
+    name: "W8N8",
+    controller: { my: true },
+    energyAvailable: opts.energyAvailable,
+    energyCapacityAvailable: opts.energyCapacityAvailable,
+    find: vi.fn((type: FindConstant) => (type === FIND_MY_SPAWNS ? [{}] : []))
+  };
+}
+
+function mockDonorRoom(storageEnergy?: number) {
+  return {
+    name: "W9N8",
+    storage: storageEnergy === undefined ? undefined : { store: { getUsedCapacity: () => storageEnergy } }
+  };
+}
+
+describe("decideNextRemoteSpawn > courier", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("spawns a courier once the sibling has its own spawn, the donor has storage surplus, and the sibling isn't topped up", () => {
+    vi.stubGlobal("Game", {
+      rooms: {
+        W9N8: mockDonorRoom(10000),
+        W8N8: mockOwnedSiblingRoom({ energyAvailable: 100, energyCapacityAvailable: 300 })
+      },
+      creeps: {}
+    });
+
+    const decision = decideNextRemoteSpawn(baseRemoteState());
+
+    expect(decision?.role).toBe("courier");
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W8N8" });
+  });
+
+  it("does not spawn a courier when the donor room has no storage yet", () => {
+    vi.stubGlobal("Game", {
+      rooms: {
+        W9N8: mockDonorRoom(undefined),
+        W8N8: mockOwnedSiblingRoom({ energyAvailable: 100, energyCapacityAvailable: 300 })
+      },
+      creeps: {}
+    });
+
+    const decision = decideNextRemoteSpawn(baseRemoteState());
+
+    expect(decision).toBeNull();
+  });
+
+  it("does not spawn a courier when the donor's storage is at or below its reserve", () => {
+    vi.stubGlobal("Game", {
+      rooms: {
+        W9N8: mockDonorRoom(5000),
+        W8N8: mockOwnedSiblingRoom({ energyAvailable: 100, energyCapacityAvailable: 300 })
+      },
+      creeps: {}
+    });
+
+    const decision = decideNextRemoteSpawn(baseRemoteState());
+
+    expect(decision).toBeNull();
+  });
+
+  it("does not spawn a courier once the sibling room is already topped up", () => {
+    vi.stubGlobal("Game", {
+      rooms: {
+        W9N8: mockDonorRoom(10000),
+        W8N8: mockOwnedSiblingRoom({ energyAvailable: 300, energyCapacityAvailable: 300 })
+      },
+      creeps: {}
+    });
+
+    const decision = decideNextRemoteSpawn(baseRemoteState());
+
+    expect(decision).toBeNull();
+  });
+
+  it("does not spawn a second courier while one is already live for that pairing", () => {
+    vi.stubGlobal("Game", {
+      rooms: {
+        W9N8: mockDonorRoom(10000),
+        W8N8: mockOwnedSiblingRoom({ energyAvailable: 100, energyCapacityAvailable: 300 })
+      },
+      creeps: {
+        courier_1: { memory: { role: "courier", homeRoom: "W9N8", remoteRoom: "W8N8" } }
+      }
+    });
+
+    const decision = decideNextRemoteSpawn(baseRemoteState());
+
+    expect(decision).toBeNull();
+  });
+});
+
 describe("decideNextRemoteSpawn > remote defender", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

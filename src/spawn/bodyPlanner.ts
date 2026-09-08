@@ -34,7 +34,12 @@ const BASE_BLOCKS: Record<BlockRole, BodyPartConstant[]> = {
   // roads" reasoning as remoteHarvester. A specific claim target might already have roads
   // (W57N24 does, from prior remote mining), but this body has to work for any future
   // colonization target, not just one that happens to be road-connected already.
-  colonizer: [WORK, CARRY, MOVE, MOVE]
+  colonizer: [WORK, CARRY, MOVE, MOVE],
+  // Ferries surplus energy from a donor room's storage to a sibling room it colonized
+  // (see remoteSpawnManager.ts's decideCourierSpawn) - same 1:1 CARRY/MOVE ratio as
+  // hauler/remoteHauler, for the same reason: no guarantee the route between two owned
+  // rooms has roads yet, so full speed loaded or not matters more than it would locally.
+  courier: [CARRY, MOVE]
 };
 
 // A source regenerates SOURCE_ENERGY_CAPACITY every ENERGY_REGEN_TIME ticks; each WORK
