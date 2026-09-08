@@ -5,6 +5,7 @@ import { checkLevelUp } from "./logging/levelUp";
 import { flushLogBuffer, log } from "./logging/logger";
 import { buildCpuSummary, buildTickSummary } from "./logging/tickSummary";
 import { cleanUpDeadCreepMemory } from "./memory/cleanup";
+import { checkColonizeDoctrineComplete } from "./planning/doctrine";
 import { recordKeeperIntel } from "./planning/keeperTargeting";
 import { recordRemoteIntel } from "./planning/remoteTargeting";
 import { planRoom } from "./planning/roomPlanner";
@@ -97,6 +98,11 @@ export function loop(): void {
       recordHostileSighting(Memory.rooms[roomName], hostiles);
       const levelUp = checkLevelUp(room, Memory.rooms[roomName]);
       if (levelUp) log("level_up", levelUp);
+
+      if (room.controller?.my) {
+        const doctrineRevert = checkColonizeDoctrineComplete(roomName, Memory.rooms[roomName]);
+        if (doctrineRevert) log("doctrine_reverted", doctrineRevert);
+      }
 
       // Overwritten every tick while visible, so it's ready the moment a remote-mining
       // candidate is scouted - recorded for every visible room, not just chosen targets.
