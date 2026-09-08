@@ -7,6 +7,14 @@ import {
   travelToRoom
 } from "./shared";
 
+// Comfortably above the ~91-tick one-way travel time to a fresh claim's controller (see
+// remoteSpawnManager.ts's RESERVER_TRAVEL_ESTIMATE) - a big multiple of that margin, so
+// this only ever needs to catch a real near-miss, not race one. Failsafe for the case
+// nobody's watching a colonize push live and spawn-build duty (see the priority block
+// below) runs long enough to threaten the controller's real downgrade timer
+// (CONTROLLER_DOWNGRADE[1] = 20,000 ticks) - see the 2026-09-08 state-of-play note.
+const DOWNGRADE_FAILSAFE_THRESHOLD = 5000;
+
 export function run(creep: Creep): void {
   const remoteRoom = creep.memory.remoteRoom;
   if (!remoteRoom) return;
@@ -14,6 +22,24 @@ export function run(creep: Creep): void {
   if (retreatFromHostileRemote(creep, remoteRoom, creep.memory.homeRoom)) return;
 
   if (!travelToRoom(creep, remoteRoom)) return;
+
+  const controller = creep.room.controller;
+  // Any upgradeController call resets ticksToDowngrade to the full CONTROLLER_DOWNGRADE
+  // value no matter how little energy it delivers, so a single nudge is enough - takes
+  // priority over spawn-build/gathering whenever it's live, since losing the claim
+  // outright is worse than a delayed spawn. Gated on whatever energy the creep is
+  // currently carrying (not "full") - waiting for a full load isn't worth the risk here.
+  if (
+    controller?.my &&
+    typeof controller.ticksToDowngrade === "number" &&
+    controller.ticksToDowngrade < DOWNGRADE_FAILSAFE_THRESHOLD &&
+    creep.store.getUsedCapacity(RESOURCE_ENERGY) > 0
+  ) {
+    if (creep.upgradeController(controller) === ERR_NOT_IN_RANGE) {
+      creep.moveTo(controller, MOVE_OPTS);
+    }
+    return;
+  }
 
   const isEmpty = creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0;
   const isFull = creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0;

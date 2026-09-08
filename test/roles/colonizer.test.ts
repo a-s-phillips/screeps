@@ -21,6 +21,7 @@ function mockCreep(opts: {
   upgradeResult?: ScreepsReturnCode;
   hasController?: boolean;
   controllerMy?: boolean;
+  ticksToDowngrade?: number;
 }) {
   const sites = opts.sites ?? [spawnSite];
   const containers = opts.containers ?? [];
@@ -29,7 +30,9 @@ function mockCreep(opts: {
 
   const room = {
     name: opts.roomName,
-    controller: hasController ? { ...controller, my: opts.controllerMy ?? true } : undefined,
+    controller: hasController
+      ? { ...controller, my: opts.controllerMy ?? true, ticksToDowngrade: opts.ticksToDowngrade }
+      : undefined,
     find: vi.fn((type: FindConstant) => {
       if (type === FIND_SOURCES_ACTIVE) return sources;
       if (type === FIND_CONSTRUCTION_SITES) return sites;
@@ -273,5 +276,97 @@ describe("colonizer role", () => {
     run(creep);
 
     expect(creep.upgradeController).not.toHaveBeenCalled();
+  });
+
+  describe("downgrade failsafe", () => {
+    it("spends energy on the controller instead of building when the downgrade timer is critically low", () => {
+      const creep = mockCreep({
+        working: true,
+        usedEnergy: 50,
+        freeCapacity: 0,
+        roomName: "W2N1",
+        remoteRoom: "W2N1",
+        sites: [spawnSite],
+        ticksToDowngrade: 4999
+      });
+
+      run(creep);
+
+      expect(creep.upgradeController).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "controller1" })
+      );
+      expect(creep.build).not.toHaveBeenCalled();
+    });
+
+    it("moves toward the controller when out of range during the failsafe", () => {
+      const creep = mockCreep({
+        working: true,
+        usedEnergy: 50,
+        freeCapacity: 0,
+        roomName: "W2N1",
+        remoteRoom: "W2N1",
+        sites: [spawnSite],
+        ticksToDowngrade: 100,
+        upgradeResult: ERR_NOT_IN_RANGE
+      });
+
+      run(creep);
+
+      expect(creep.moveTo).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "controller1" }),
+        MOVE_OPTS
+      );
+    });
+
+    it("does not trigger the failsafe when the creep has no energy to spend", () => {
+      const creep = mockCreep({
+        working: false,
+        usedEnergy: 0,
+        freeCapacity: 50,
+        roomName: "W2N1",
+        remoteRoom: "W2N1",
+        sites: [spawnSite],
+        ticksToDowngrade: 100
+      });
+
+      run(creep);
+
+      expect(creep.upgradeController).not.toHaveBeenCalled();
+      expect(creep.harvest).toHaveBeenCalled();
+    });
+
+    it("does not trigger the failsafe when the downgrade timer has a comfortable buffer", () => {
+      const creep = mockCreep({
+        working: true,
+        usedEnergy: 50,
+        freeCapacity: 0,
+        roomName: "W2N1",
+        remoteRoom: "W2N1",
+        sites: [spawnSite],
+        ticksToDowngrade: 5000
+      });
+
+      run(creep);
+
+      expect(creep.upgradeController).not.toHaveBeenCalled();
+      expect(creep.build).toHaveBeenCalledWith(spawnSite);
+    });
+
+    it("does not trigger the failsafe on a controller we don't own yet", () => {
+      const creep = mockCreep({
+        working: true,
+        usedEnergy: 50,
+        freeCapacity: 0,
+        roomName: "W2N1",
+        remoteRoom: "W2N1",
+        sites: [spawnSite],
+        controllerMy: false,
+        ticksToDowngrade: 100
+      });
+
+      run(creep);
+
+      expect(creep.upgradeController).not.toHaveBeenCalled();
+    });
   });
 });
