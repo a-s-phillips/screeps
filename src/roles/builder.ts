@@ -20,24 +20,34 @@ export function run(creep: Creep): void {
   const containerSites = sites.filter(
     (candidate) => candidate.structureType === STRUCTURE_CONTAINER
   );
-  // Same "closest site alone can't guarantee this gets built" problem containers have,
-  // just for a different reason: a rampart/tower can cost as little as 1 build point, so
-  // once a builder happens to be sitting closer to some other in-progress site it can
-  // lose that distance race forever, no matter how cheap or urgent it is. Found live:
-  // W57N24's spawn-tile rampart (see TOWER_PRIORITY_OVERRIDE - built specifically to get
-  // ahead of a repeat attack) sat at 0/1 progress for hours while builders kept finishing
-  // extensions instead.
+  // A rampart is placed directly on top of the structure it protects (see
+  // roomPlanner.ts's rampart anchors: spawn, towers, storage, links) - unlike every other
+  // site type, its tile is never free ground, it's already occupied by a destructible
+  // structure. findClosestByPath/moveTo default to range: 0 ("path to the tile the target
+  // is on"), and a destructible structure blocks pathing by default (see
+  // ignoreDestructibleStructures) - so a rampart's own tile is unreachable at range 0,
+  // and findClosestByPath silently excludes it (returns null) rather than picking it.
+  // Found live: W57N24's spawn-tile rampart (see TOWER_PRIORITY_OVERRIDE - built
+  // specifically to get ahead of a repeat attack) sat at 0/1 progress for hours while
+  // builders, unable to ever select it at all, kept finishing extensions instead. range:
+  // 1 only requires getting adjacent, which is all build()'s own range-3 requirement ever
+  // needed anyway - same fix REMOTE_MOVE_OPTS already applies for the equivalent
+  // cross-room waypoint problem.
   const defenseSites = sites.filter(
     (candidate) =>
       candidate.structureType === STRUCTURE_RAMPART || candidate.structureType === STRUCTURE_TOWER
   );
   const site =
     creep.pos.findClosestByPath(containerSites) ??
-    creep.pos.findClosestByPath(defenseSites) ??
+    creep.pos.findClosestByPath(defenseSites, { range: 1 }) ??
     creep.pos.findClosestByPath(sites);
   if (site) {
+    const moveOpts =
+      site.structureType === STRUCTURE_RAMPART || site.structureType === STRUCTURE_TOWER
+        ? { ...MOVE_OPTS, range: 1 }
+        : MOVE_OPTS;
     if (creep.build(site) === ERR_NOT_IN_RANGE) {
-      creep.moveTo(site, MOVE_OPTS);
+      creep.moveTo(site, moveOpts);
     }
     return;
   }

@@ -145,10 +145,11 @@ describe("builder role", () => {
   });
 
   it("prioritizes a rampart construction site over a cheaper, non-defensive site", () => {
-    // Regression test: found live in W57N24 - a rampart on the spawn's tile (built
-    // specifically to get ahead of a repeat attack) sat at 0/1 progress for hours because
-    // builders kept converging on extension sites instead, the same "closest wins
-    // forever" problem containers already had (see the container-priority test above).
+    // Regression test: found live in W57N24 - a rampart on the spawn's tile sat at 0/1
+    // progress for hours. findClosestByPath defaults to range 0 (must reach the exact
+    // tile), and a rampart's tile is never free ground - it's always occupied by the
+    // structure it protects (see the range: 1 fix below this test), which made it
+    // unreachable and silently excluded builders from ever picking it at all.
     const otherSite = { id: "site1", structureType: STRUCTURE_EXTENSION };
     const rampartSite = { id: "site2", structureType: STRUCTURE_RAMPART };
     const creep = mockCreep({
@@ -176,6 +177,39 @@ describe("builder role", () => {
     run(creep);
 
     expect(creep.build).toHaveBeenCalledWith(towerSite);
+  });
+
+  it("searches for a rampart/tower site with range: 1, since its tile is never free ground", () => {
+    // The site itself: findClosestByPath's default range is 0 ("path to the tile the
+    // target is on"), but a rampart/tower's tile is occupied by the structure it
+    // protects (or, for a tower, may end up boxed in by other structures) - range: 1
+    // only requires getting adjacent, which is all build()'s own range-3 need ever was.
+    const rampartSite = { id: "site1", structureType: STRUCTURE_RAMPART };
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 50,
+      freeCapacity: 0,
+      sites: [rampartSite]
+    });
+
+    run(creep);
+
+    expect(creep.pos.findClosestByPath).toHaveBeenCalledWith([rampartSite], { range: 1 });
+  });
+
+  it("moves toward a rampart/tower site with range: 1 when out of build range", () => {
+    const rampartSite = { id: "site1", structureType: STRUCTURE_RAMPART };
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 50,
+      freeCapacity: 0,
+      sites: [rampartSite],
+      buildResult: ERR_NOT_IN_RANGE
+    });
+
+    run(creep);
+
+    expect(creep.moveTo).toHaveBeenCalledWith(rampartSite, { ...MOVE_OPTS, range: 1 });
   });
 
   it("still prioritizes a container site over a rampart site", () => {
