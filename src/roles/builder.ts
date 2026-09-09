@@ -33,13 +33,18 @@ export function run(creep: Creep): void {
   // 1 only requires getting adjacent, which is all build()'s own range-3 requirement ever
   // needed anyway - same fix REMOTE_MOVE_OPTS already applies for the equivalent
   // cross-room waypoint problem.
-  const defenseSites = sites.filter(
-    (candidate) =>
-      candidate.structureType === STRUCTURE_RAMPART || candidate.structureType === STRUCTURE_TOWER
-  );
+  //
+  // Towers and ramparts are checked as two separate, ordered groups rather than one
+  // combined pool - a tower is the only thing that actually stops a fight in progress
+  // (a rampart just delays it), so it must win over a same-tick rampart site regardless
+  // of which happens to be closer. Once a room's tower is up (or hasn't unlocked yet),
+  // this collapses back to "whichever rampart is closest", same as before.
+  const towerSites = sites.filter((candidate) => candidate.structureType === STRUCTURE_TOWER);
+  const rampartSites = sites.filter((candidate) => candidate.structureType === STRUCTURE_RAMPART);
   const site =
     creep.pos.findClosestByPath(containerSites) ??
-    creep.pos.findClosestByPath(defenseSites, { range: 1 }) ??
+    creep.pos.findClosestByPath(towerSites, { range: 1 }) ??
+    creep.pos.findClosestByPath(rampartSites, { range: 1 }) ??
     creep.pos.findClosestByPath(sites);
   if (site) {
     const moveOpts =

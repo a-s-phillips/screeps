@@ -179,6 +179,23 @@ describe("builder role", () => {
     expect(creep.build).toHaveBeenCalledWith(towerSite);
   });
 
+  it("prioritizes a tower construction site over a rampart site", () => {
+    // A tower is the only thing that actually stops a fight in progress (a rampart just
+    // delays it) - it must win regardless of which happens to be closer.
+    const rampartSite = { id: "site1", structureType: STRUCTURE_RAMPART };
+    const towerSite = { id: "site2", structureType: STRUCTURE_TOWER };
+    const creep = mockCreep({
+      working: true,
+      usedEnergy: 50,
+      freeCapacity: 0,
+      sites: [rampartSite, towerSite]
+    });
+
+    run(creep);
+
+    expect(creep.build).toHaveBeenCalledWith(towerSite);
+  });
+
   it("searches for a rampart/tower site with range: 1, since its tile is never free ground", () => {
     // The site itself: findClosestByPath's default range is 0 ("path to the tile the
     // target is on"), but a rampart/tower's tile is occupied by the structure it
