@@ -19,6 +19,12 @@ export function isRoomOwnedByOther(remoteIntel: RemoteIntel | undefined): boolea
   return remoteIntel?.ownedByOther === true;
 }
 
+// See RemoteIntel.ownedByMe's own comment for why this can't be derived from
+// !ownedByOther - our own home room reports ownedByOther: false too.
+export function isRoomOwnedByMe(remoteIntel: RemoteIntel | undefined): boolean {
+  return remoteIntel?.ownedByMe === true;
+}
+
 // Static map exit topology - no vision required, works for a room the bot has never seen.
 function describeExitRooms(roomName: string): string[] {
   const exits = Game.map.describeExits(roomName);
@@ -73,6 +79,13 @@ export function pickBestCandidate(
     const intel = intelByRoom[candidate]!;
     return (
       !intel.ownedByOther &&
+      // A room we already own (most often our own home room, for a sibling picking its
+      // own remote targets) is never a legitimate new pick here - the one legitimate way
+      // a resolved room ends up owned by us is the claimTarget/colonizer promotion path,
+      // which writes directly into remoteRooms and never goes through this picker. Found
+      // live: W57N24 picked its own home room W57N25 as a remote candidate, since
+      // ownedByOther alone doesn't catch "owned by us".
+      !intel.ownedByMe &&
       !intel.reservedByOther &&
       !intel.hasSourceKeeper &&
       intel.sourceCount > 0
@@ -129,6 +142,33 @@ export function resolveNextRemoteRoom(
   return undefined;
 }
 
+// Cleans up remoteRooms entries that pickBestCandidate's ownedByMe guard now stops from
+// being picked, but which can still exist in Memory from before that guard existed (a
+// slot picked while the candidate was still unowned, then later claimed by us some other
+// way than the claimTarget/colonizer path) - found live: W57N24's remoteRooms contained
+// its own home room, W57N25, self-targeted before this guard shipped. A resolved room
+// owned by us is only ever legitimate via claimTarget (see its own comment: "the reserver
+// claims it instead of reserving" - the sole intentional owned-and-resolved case, which
+// also keeps decideCourierSpawn's donor->sibling lookup working). Anything else owned by
+// us occupying a slot is dead weight - it can never be picked again (pickBestCandidate
+// excludes it) and it's not being put to any use (not the courier's target), so freeing
+// the slot lets resolveNextRemoteRoom pick a real replacement instead of leaving it stuck
+// forever, same "sticky, never re-evaluated" tradeoff resolveNextRemoteRoom already
+// accepts elsewhere. A candidate with no recorded intel yet is left alone rather than
+// guessed at - there's no evidence yet that it needs pruning.
+export function pruneOwnedRemoteRooms(
+  homeMemory: RoomMemory,
+  intelByRoom: Record<string, RemoteIntel | undefined>
+): void {
+  const chosen = homeMemory.remoteRooms;
+  if (!chosen) return;
+
+  homeMemory.remoteRooms = chosen.filter((room) => {
+    if (room === homeMemory.claimTarget) return true;
+    return !isRoomOwnedByMe(intelByRoom[room]);
+  });
+}
+
 // Single source of truth for "who are we" - reserver.ts also needs this to tell its own
 // reservation renewal apart from a rival's, and duplicating the lookup risks the two
 // drifting apart on how "us" is identified.
@@ -173,6 +213,7 @@ export function recordRemoteIntel(room: Room, memory: RoomMemory): void {
   memory.remoteIntel = {
     sourceCount: getCachedFind(room, FIND_SOURCES).length,
     ownedByOther: controller?.owner !== undefined && !controller.my,
+    ownedByMe: controller?.my === true,
     reservedByOther:
       controller?.reservation !== undefined && controller.reservation.username !== myUsername,
     hasSourceKeeper: getCachedFind(room, FIND_HOSTILE_STRUCTURES).some(

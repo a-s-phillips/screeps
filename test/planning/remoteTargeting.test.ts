@@ -6,9 +6,11 @@ import {
   hasGclHeadroomForAnotherRoom,
   isClaimWindowApproaching,
   isRoomHostile,
+  isRoomOwnedByMe,
   isRoomOwnedByOther,
   MAX_REMOTE_ROOMS,
   pickBestCandidate,
+  pruneOwnedRemoteRooms,
   recordRemoteIntel,
   REMOTE_HOSTILE_MEMORY_WINDOW,
   resolveNextRemoteRoom
@@ -131,6 +133,7 @@ function intel(overrides: Partial<RemoteIntel> = {}): RemoteIntel {
   return {
     sourceCount: 2,
     ownedByOther: false,
+    ownedByMe: false,
     reservedByOther: false,
     hasSourceKeeper: false,
     ...overrides
@@ -156,6 +159,18 @@ describe("pickBestCandidate", () => {
   it("excludes a candidate owned by another player", () => {
     const result = pickBestCandidate(["A", "B"], {
       A: intel({ ownedByOther: true, sourceCount: 2 }),
+      B: intel({ sourceCount: 1 })
+    });
+
+    expect(result).toBe("B");
+  });
+
+  it("excludes a candidate we already own", () => {
+    // Reproduces the live bug: ownedByOther is false for our own room (it's not "owned
+    // by another player"), so without its own check this let a sibling room pick its own
+    // home room as a remote target.
+    const result = pickBestCandidate(["A", "B"], {
+      A: intel({ ownedByMe: true, sourceCount: 2 }),
       B: intel({ sourceCount: 1 })
     });
 
@@ -436,6 +451,20 @@ describe("isRoomOwnedByOther", () => {
   });
 });
 
+describe("isRoomOwnedByMe", () => {
+  it("is false when no intel has been recorded yet", () => {
+    expect(isRoomOwnedByMe(undefined)).toBe(false);
+  });
+
+  it("is false when the room is not owned by us", () => {
+    expect(isRoomOwnedByMe(intel({ ownedByMe: false }))).toBe(false);
+  });
+
+  it("is true when the room is owned by us", () => {
+    expect(isRoomOwnedByMe(intel({ ownedByMe: true }))).toBe(true);
+  });
+});
+
 describe("getMyUsername", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -563,6 +592,26 @@ describe("recordRemoteIntel", () => {
     expect(memory.remoteIntel?.ownedByOther).toBe(false);
   });
 
+  it("flags our own owned room as ownedByMe", () => {
+    vi.stubGlobal("Game", { spawns: { Spawn1: { owner: { username: "me" } } } });
+    const room = mockRoom({ name: "W9N8", owner: "me", isMine: true });
+    const memory: RoomMemory = {};
+
+    recordRemoteIntel(room, memory);
+
+    expect(memory.remoteIntel?.ownedByMe).toBe(true);
+  });
+
+  it("does not flag a room owned by another player as ownedByMe", () => {
+    vi.stubGlobal("Game", { spawns: { Spawn1: { owner: { username: "me" } } } });
+    const room = mockRoom({ name: "W9N9", owner: "MichaelBot", isMine: false });
+    const memory: RoomMemory = {};
+
+    recordRemoteIntel(room, memory);
+
+    expect(memory.remoteIntel?.ownedByMe).toBe(false);
+  });
+
   it("flags a room reserved by another player", () => {
     vi.stubGlobal("Game", { spawns: { Spawn1: { owner: { username: "me" } } } });
     const room = mockRoom({ name: "W8N8", reservedBy: "someoneElse" });
@@ -591,5 +640,55 @@ describe("recordRemoteIntel", () => {
     recordRemoteIntel(room, memory);
 
     expect(memory.remoteIntel?.hasSourceKeeper).toBe(true);
+  });
+});
+
+describe("pruneOwnedRemoteRooms", () => {
+  it("does nothing when remoteRooms is unset", () => {
+    const homeMemory: RoomMemory = {};
+
+    pruneOwnedRemoteRooms(homeMemory, {});
+
+    expect(homeMemory.remoteRooms).toBeUndefined();
+  });
+
+  it("drops a resolved room that is owned by us and is not the claim target", () => {
+    // Reproduces the live bug: W57N24 self-targeted its own home room, W57N25, before
+    // pickBestCandidate's ownedByMe guard existed.
+    const homeMemory: RoomMemory = { remoteRooms: ["W57N25", "W57N22"] };
+
+    pruneOwnedRemoteRooms(homeMemory, {
+      W57N25: intel({ ownedByMe: true }),
+      W57N22: intel({ reservedByOther: true })
+    });
+
+    expect(homeMemory.remoteRooms).toEqual(["W57N22"]);
+  });
+
+  it("keeps a resolved room owned by us when it is the claim target", () => {
+    // The claimTarget/colonizer promotion is the one intentional way a resolved room
+    // ends up owned by us - see decideCourierSpawn's donor->sibling lookup, which
+    // depends on this entry staying in remoteRooms after the claim lands.
+    const homeMemory: RoomMemory = { remoteRooms: ["W57N24"], claimTarget: "W57N24" };
+
+    pruneOwnedRemoteRooms(homeMemory, { W57N24: intel({ ownedByMe: true }) });
+
+    expect(homeMemory.remoteRooms).toEqual(["W57N24"]);
+  });
+
+  it("leaves a resolved room alone when it has no recorded intel yet", () => {
+    const homeMemory: RoomMemory = { remoteRooms: ["W57N22"] };
+
+    pruneOwnedRemoteRooms(homeMemory, {});
+
+    expect(homeMemory.remoteRooms).toEqual(["W57N22"]);
+  });
+
+  it("keeps a resolved room that is not owned by us", () => {
+    const homeMemory: RoomMemory = { remoteRooms: ["W57N22"] };
+
+    pruneOwnedRemoteRooms(homeMemory, { W57N22: intel({ reservedByOther: true }) });
+
+    expect(homeMemory.remoteRooms).toEqual(["W57N22"]);
   });
 });

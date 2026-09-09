@@ -33,6 +33,11 @@ declare global {
   interface RemoteIntel {
     sourceCount: number;
     ownedByOther: boolean;
+    // Distinct from ownedByOther (which is specifically "owned by someone else") - a
+    // room we own ourselves is not "other", so ownedByOther alone can't stop the
+    // candidate picker from targeting our own home room. See remoteTargeting.ts's
+    // pickBestCandidate and pruneOwnedRemoteRooms for where this matters.
+    ownedByMe: boolean;
     reservedByOther: boolean;
     hasSourceKeeper: boolean;
   }

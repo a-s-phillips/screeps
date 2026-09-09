@@ -4,6 +4,7 @@ import {
   isRoomHostile,
   isRoomOwnedByOther,
   MAX_REMOTE_ROOMS,
+  pruneOwnedRemoteRooms,
   resolveNextRemoteRoom
 } from "../planning/remoteTargeting";
 import { chebyshevDistance } from "../utils/grid";
@@ -557,6 +558,17 @@ export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | n
 export function decideRemoteSpawn(room: Room): SpawnDecision | null {
   Memory.rooms[room.name] = Memory.rooms[room.name] || {};
   const homeMemory = Memory.rooms[room.name];
+
+  // Self-heals a slot that pickBestCandidate's ownedByMe guard would now refuse to pick,
+  // but which can still be sitting in Memory from before that guard existed - see
+  // pruneOwnedRemoteRooms's own comment. Run ahead of everything else below so a freed
+  // slot is available for resolveNextRemoteRoom to fill within the same tick.
+  const preprunedRooms = homeMemory.remoteRooms ?? [];
+  const preprunedIntel: Record<string, RemoteIntel | undefined> = {};
+  for (const remoteRoomName of preprunedRooms) {
+    preprunedIntel[remoteRoomName] = Memory.rooms[remoteRoomName]?.remoteIntel;
+  }
+  pruneOwnedRemoteRooms(homeMemory, preprunedIntel);
 
   const resolvedRooms = homeMemory.remoteRooms ?? [];
   const states = resolvedRooms.map((remoteRoomName) => buildRemoteRoomState(room, remoteRoomName));
