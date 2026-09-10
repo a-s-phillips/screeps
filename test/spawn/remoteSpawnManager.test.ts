@@ -4,6 +4,7 @@ import {
   decideNextRemoteSpawn,
   decideRemoteSpawn,
   decideScoutSpawn,
+  decideScoutSpawnForRoom,
   MAX_RESERVER_CLAIM_PARTS,
   remoteHaulerTarget,
   RemoteRoomState
@@ -87,6 +88,45 @@ describe("decideScoutSpawn", () => {
 
   it("returns null for an empty candidate list", () => {
     expect(decideScoutSpawn("W9N8", [], {}, new Set())).toBeNull();
+  });
+});
+
+describe("decideScoutSpawnForRoom", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("spawns a scout for the first candidate with no recorded intel", () => {
+    vi.stubGlobal("Game", {
+      map: { describeExits: vi.fn().mockReturnValue({ "1": "W9N9" }) },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const decision = decideScoutSpawnForRoom(mockRoom("W9N8"));
+
+    expect(decision?.role).toBe("scout");
+    expect(decision?.memory).toEqual({ homeRoom: "W9N8", remoteRoom: "W9N9" });
+  });
+
+  it("returns null once both remote slots are already resolved", () => {
+    vi.stubGlobal("Game", {
+      map: { describeExits: vi.fn().mockReturnValue({ "1": "W9N9" }) },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: { W9N8: { remoteRooms: ["W8N8", "W9N7"] } } });
+
+    expect(decideScoutSpawnForRoom(mockRoom("W9N8"))).toBeNull();
+  });
+
+  it("returns null when every remaining candidate already has intel or a scout en route", () => {
+    vi.stubGlobal("Game", {
+      map: { describeExits: vi.fn().mockReturnValue({ "1": "W9N9" }) },
+      creeps: { scout1: { memory: { role: "scout", remoteRoom: "W9N9" } } }
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    expect(decideScoutSpawnForRoom(mockRoom("W9N8"))).toBeNull();
   });
 });
 

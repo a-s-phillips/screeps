@@ -90,6 +90,37 @@ export function decideScoutSpawn(
   };
 }
 
+// Callable independently of decideRemoteSpawn, and from a point in spawnManager's
+// priority chain *ahead of* the hasUnmetLocalNeed gate - a scout is one MOVE part (50E,
+// 3 spawn-ticks), negligible next to any real local body, so there's no good reason to
+// make it wait behind a local deficit the way actual remote-economy roles must (see
+// decideRemoteSpawn's own top comment for why *those* stay gated). Found live: a room
+// with a genuine local deficit that simply isn't affordable yet (decideNextSpawn returns
+// null for lack of energy) left the spawn fully idle rather than using that idle tick for
+// a scout that costs almost nothing - six candidate rooms sat unscouted for tens of
+// thousands of ticks as a result, even with the bucket permanently maxed.
+export function decideScoutSpawnForRoom(room: Room): SpawnDecision | null {
+  const resolvedRooms = Memory.rooms[room.name]?.remoteRooms ?? [];
+  if (resolvedRooms.length >= MAX_REMOTE_ROOMS) return null;
+
+  const candidates = getRemoteCandidates(room.name).filter(
+    (candidate) => !resolvedRooms.includes(candidate)
+  );
+  const candidateMemories: Record<string, RoomMemory | undefined> = {};
+  for (const candidate of candidates) {
+    candidateMemories[candidate] = Memory.rooms[candidate];
+  }
+
+  const liveScoutTargets = new Set(
+    Object.values(Game.creeps)
+      .filter((creep) => creep.memory.role === "scout")
+      .map((creep) => creep.memory.remoteRoom)
+      .filter((remoteRoom): remoteRoom is string => remoteRoom !== undefined)
+  );
+
+  return decideScoutSpawn(room.name, candidates, candidateMemories, liveScoutTargets);
+}
+
 export interface RemoteRoomState {
   homeRoomName: string;
   remoteRoomName: string;

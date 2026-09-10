@@ -718,6 +718,26 @@ describe("runSpawning", () => {
     expect(spawn.spawnCreep).not.toHaveBeenCalled();
   });
 
+  it("spawns a scout on an otherwise-idle tick even with a local role under target, since nothing local is affordable", () => {
+    // No creeps at all (upgrader deficit of 2 makes hasUnmetLocalNeed true), but
+    // energyAvailable is too low for decideNextSpawn to afford anything - the spawn
+    // would otherwise sit fully idle this tick. A scout costs only 50E, so it should
+    // still go out rather than waiting on the local deficit to become affordable.
+    vi.stubGlobal("Game", {
+      time: 12345,
+      map: { describeExits: vi.fn().mockReturnValue({ "1": "W2N2" }) },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+    const spawn = mockSpawn(false);
+
+    runSpawning(spawn, mockRoom({ energyAvailable: 50 }));
+
+    expect(spawn.spawnCreep).toHaveBeenCalledWith([MOVE], "scout_12345", {
+      memory: { role: "scout", working: false, homeRoom: "W1N1", remoteRoom: "W2N2" }
+    });
+  });
+
   it("spawns a keeperHarvester only once local needs are met and there's no remote-mining candidate to resolve", () => {
     vi.stubGlobal("Game", {
       time: 12345,

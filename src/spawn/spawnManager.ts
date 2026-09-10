@@ -5,7 +5,7 @@ import { getCachedFind } from "../utils/roomCache";
 import { bodyCost, planBody, planMinerBody } from "./bodyPlanner";
 import { isNearingDeath, replacementLeadTime } from "./preSpawn";
 import { decideKeeperSpawn } from "./keeperSpawnManager";
-import { decideRemoteSpawn } from "./remoteSpawnManager";
+import { decideRemoteSpawn, decideScoutSpawnForRoom } from "./remoteSpawnManager";
 import { SpawnDecision } from "./spawnDecision";
 
 export type { SpawnDecision };
@@ -370,8 +370,12 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     recycleSurplusHarvesters(spawn, harvesterCreeps, excessHarvesters);
   }
 
+  // decideScoutSpawnForRoom runs ahead of the hasUnmetLocalNeed gate deliberately - see
+  // its own comment for why a scout is cheap enough to never need to wait behind a local
+  // deficit the way decideRemoteSpawn's other roles must.
   const decision =
     decideNextSpawn(state) ??
+    decideScoutSpawnForRoom(room) ??
     (hasUnmetLocalNeed(state) ? null : (decideRemoteSpawn(room) ?? decideKeeperSpawn(room)));
   if (!decision) return;
 
