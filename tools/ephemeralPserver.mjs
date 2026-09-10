@@ -2,7 +2,7 @@
 // Spins up a disposable, from-scratch Screeps private server per experiment -
 // seeded precisely for one hypothesis, observed directly via the admin CLI, then
 // torn down - instead of routing verification through the persistent pserver
-// (~/code/screeps/pserver), which accumulates one-off test scenarios over time
+// (~/screeps/pserver), which accumulates one-off test scenarios over time
 // (cloned replicas, renamed spawns, boxed-in terrain from earlier experiments)
 // until it's a worse proxy for official than official itself is. See
 // ~/secondbrain "Screeps bot: state of play, 2026-09-04" for the reasoning.
@@ -33,7 +33,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { runCliCommand } from "./pserverCli.mjs";
 
-const TEMPLATE_DATA_DIR = path.join(homedir(), "code/screeps/pserver/data");
+const TEMPLATE_DATA_DIR = path.join(homedir(), "screeps/pserver/data");
 const EPHEMERAL_ROOT = path.join(tmpdir(), "screeps-ephemeral");
 const DEFAULT_PORT = 21125;
 // Thrown away with the instance - only exists so the seeded room's structures have

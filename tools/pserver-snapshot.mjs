@@ -22,7 +22,7 @@ import { runCliCommand } from "./pserverCli.mjs";
 // Overridable via env so ephemeralPserver.mjs can point this same, already-proven
 // scenario-seeding logic at a disposable instance instead of the persistent one -
 // unset, behavior is identical to before these existed.
-const PSERVER_DATA_DIR = process.env.PSERVER_DATA_DIR ?? path.join(homedir(), "code/screeps/pserver/data");
+const PSERVER_DATA_DIR = process.env.PSERVER_DATA_DIR ?? path.join(homedir(), "screeps/pserver/data");
 const PSERVER_CONTAINER = process.env.PSERVER_CONTAINER ?? "screeps-pserver";
 
 const NPC_USER_IDS = new Set(["2", "3"]); // invaders, source keepers

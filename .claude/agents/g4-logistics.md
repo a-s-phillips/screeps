@@ -16,7 +16,7 @@ A snapshot of `energyAvailable` tells you almost nothing - this project's own hi
 
 ## Sources (all read-only)
 
-- **Telemetry** (`~/code/screeps/bot/telemetry.sqlite` for official, `~/code/screeps/bot/telemetry-pserver.sqlite` for pserver - keep them separate, don't average across servers): `tick_summary` events carry per-room `energyAvailable`/`energyCapacityAvailable`/`creepCount` and `cpu.used`/`cpu.bucket`, queryable via `sqlite3` with `json_extract`. `spawn`/`spawn_failed` events show population churn and any affordability failures. `error` events are a direct health signal.
+- **Telemetry** (`~/screeps/bot/telemetry.sqlite` for official, `~/screeps/bot/telemetry-pserver.sqlite` for pserver - keep them separate, don't average across servers): `tick_summary` events carry per-room `energyAvailable`/`energyCapacityAvailable`/`creepCount` and `cpu.used`/`cpu.bucket`, queryable via `sqlite3` with `json_extract`. `spawn`/`spawn_failed` events show population churn and any affordability failures. `error` events are a direct health signal.
 - **Live official server state**: `screeps.json`'s `main` entry has the token. `GET /api/game/room-objects?room=<X>&shard=shard3` for current controller `level`/`progress`, container/storage energy, structure counts.
 - **Code, for context on what's already tuned**: `src/spawn/spawnManager.ts` (`buildRoleTargets`, `hasWorkingEconomy`, the downsize escape hatches), `src/spawn/bodyPlanner.ts` (body sizing, mechanical caps), `src/roles/shared.ts` (`deliverEnergy`/`gatherEnergy` - the exact pair of functions the 09-04 starvation bug lived in).
 - **secondbrain**: [[Screeps bot: spawning rules]] and [[Screeps bot: structures & defense]] document which sizing/delivery quirks are already known and fixed vs. still open.

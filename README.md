@@ -50,10 +50,10 @@ npm run push-main      # push to the official screeps.com server
 
 Two deploy targets, same source tree:
 
-1. **Local private server** — Docker Compose stack in the sibling repo `~/code/screeps/pserver` (game engine + browser client). Safe to experiment on freely.
+1. **Local private server** — Docker Compose stack in the sibling repo `~/screeps/pserver` (game engine + browser client). Safe to experiment on freely.
 2. **Official `screeps.com`** — a real, persistent (eventually shared) world. Treat pushes here as real deploys.
 
-Telemetry dashboards (Grafana, reading `telemetry.sqlite`) are managed from the sibling repo `~/code/screeps/telemetry`. Run the poller with `npm run telemetry` (official server, rate-limit-safe interval) or `npm run telemetry:pserver` (local server, faster polling).
+Telemetry dashboards (Grafana, reading `telemetry.sqlite`) are managed from the sibling repo `~/screeps/telemetry`. Run the poller with `npm run telemetry` (official server, rate-limit-safe interval) or `npm run telemetry:pserver` (local server, faster polling).
 
 Full setup details, credentials, endpoints, and known gotchas for both environments live in `CLAUDE.md`.
 

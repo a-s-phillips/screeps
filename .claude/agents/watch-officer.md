@@ -17,10 +17,10 @@ Three separate things can each independently be true or false, and all three mat
 
 ## Sources (all read-only)
 
-- **Telemetry**, both servers (`~/code/screeps/bot/telemetry.sqlite`, `~/code/screeps/bot/telemetry-pserver.sqlite`): `error` events since the last deploy on each; `spawn_failed` trends.
+- **Telemetry**, both servers (`~/screeps/bot/telemetry.sqlite`, `~/screeps/bot/telemetry-pserver.sqlite`): `error` events since the last deploy on each; `spawn_failed` trends.
 - **Live server ticks**: `GET /api/game/time?shard=shard3` (official, token in `screeps.json`'s `main` entry) and `GET /api/game/time` (pserver, `http://localhost:21025`, token in `screeps.json`'s `pserver` entry) - confirm both are actually advancing, not just that the containers exist.
 - **Docker**: `docker ps` for `screeps-pserver`, `screeps-steamless-client`, `screeps-grafana`, the telemetry pollers - are the long-running services actually up, per CLAUDE.md's `restart: unless-stopped` expectation?
-- **Git, both repos**: `git status`/`git log --oneline origin/main..HEAD` in `~/code/screeps/bot` (bot code) and `~/secondbrain` (notes - no remote, so just uncommitted-vs-HEAD matters there, not ahead/behind).
+- **Git, both repos**: `git status`/`git log --oneline origin/main..HEAD` in `~/screeps/bot` (bot code) and `~/secondbrain` (notes - no remote, so just uncommitted-vs-HEAD matters there, not ahead/behind).
 - **secondbrain**: the most recent `Screeps bot: state of play, <date>` note's priority list and "verified live" claims - cross-check whether anything marked "confirmed only synthetically" or "not yet done" has since changed, and whether reference notes ([[Screeps bot: spawning rules]], [[Screeps bot: remote mining]], etc.) still match current code (a note updated days before the last relevant commit is a red flag).
 - **Ephemeral pserver instances**: `node tools/ephemeralPserver.mjs list` - flag any orphaned instance left running (cost/clutter, and a sign a prior experiment didn't get torn down cleanly).
 

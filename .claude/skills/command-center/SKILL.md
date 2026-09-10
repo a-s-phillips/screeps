@@ -1,6 +1,6 @@
 ---
 name: command-center
-description: Forward-planning status update for the Screeps bot in ~/code/screeps/bot - pulls live game state, telemetry, and repo/notes health via dedicated desk subagents (G2 Intelligence, G4 Logistics, Watch Officer), then synthesizes a decision brief biased toward proactive expansion. Use this whenever the user asks for a Screeps bot status update, wants to "look at game state and ideate next steps," asks "what's next" for the bot, or wants a forward-planning / strategic review of the colony - not for narrow single-question checks (e.g. "is pserver still running") that don't need a full staff.
+description: Forward-planning status update for the Screeps bot in ~/screeps/bot - pulls live game state, telemetry, and repo/notes health via dedicated desk subagents (G2 Intelligence, G4 Logistics, Watch Officer), then synthesizes a decision brief biased toward proactive expansion. Use this whenever the user asks for a Screeps bot status update, wants to "look at game state and ideate next steps," asks "what's next" for the bot, or wants a forward-planning / strategic review of the colony - not for narrow single-question checks (e.g. "is pserver still running") that don't need a full staff.
 ---
 
 # Command Center
