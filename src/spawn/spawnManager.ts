@@ -370,12 +370,21 @@ export function runSpawning(spawn: StructureSpawn, room: Room): void {
     recycleSurplusHarvesters(spawn, harvesterCreeps, excessHarvesters);
   }
 
-  // decideScoutSpawnForRoom runs ahead of the hasUnmetLocalNeed gate deliberately - see
-  // its own comment for why a scout is cheap enough to never need to wait behind a local
-  // deficit the way decideRemoteSpawn's other roles must.
+  // decideScoutSpawnForRoom runs ahead of decideNextSpawn itself, not just ahead of the
+  // hasUnmetLocalNeed gate below - putting it after decideNextSpawn's null check doesn't
+  // work, because decideNextSpawn only returns null once energyAvailable drops below 50
+  // (the cheapest possible part), which is also exactly what a scout itself costs. Found
+  // live: W57N24 went 10,000+ ticks with zero scouts after that ordering first shipped,
+  // because a growing room's economy-role downsizing (feederSizingCapacity) means
+  // decideNextSpawn produces *some* decision on every tick with any deficit and any
+  // positive energy - effectively always, for a room that's still catching up. Deferring
+  // only to an active hostile threat (not the softer sticky-defender tier, and not
+  // routine economy deficits) keeps defense uncompromised while letting a one-time,
+  // self-limiting 50E scout interleave with ordinary local growth instead of waiting on a
+  // tick that structurally can't arrive.
   const decision =
+    (state.hostileCreepCount > 0 ? null : decideScoutSpawnForRoom(room)) ??
     decideNextSpawn(state) ??
-    decideScoutSpawnForRoom(room) ??
     (hasUnmetLocalNeed(state) ? null : (decideRemoteSpawn(room) ?? decideKeeperSpawn(room)));
   if (!decision) return;
 

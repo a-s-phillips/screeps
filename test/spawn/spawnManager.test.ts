@@ -718,11 +718,13 @@ describe("runSpawning", () => {
     expect(spawn.spawnCreep).not.toHaveBeenCalled();
   });
 
-  it("spawns a scout on an otherwise-idle tick even with a local role under target, since nothing local is affordable", () => {
-    // No creeps at all (upgrader deficit of 2 makes hasUnmetLocalNeed true), but
-    // energyAvailable is too low for decideNextSpawn to afford anything - the spawn
-    // would otherwise sit fully idle this tick. A scout costs only 50E, so it should
-    // still go out rather than waiting on the local deficit to become affordable.
+  it("spawns a scout ahead of a local role under target, even with plenty of energy to afford the local need", () => {
+    // No creeps at all (upgrader deficit of 2 makes hasUnmetLocalNeed true) and full
+    // energy - decideNextSpawn would happily downsize-or-spawn a local role here, so a
+    // scout only gets a turn at all if it runs *ahead* of decideNextSpawn, not merely in
+    // the gap where decideNextSpawn returns null (see the scout-ordering comment in
+    // spawnManager.ts for why that gap is actually unreachable: it only opens below 50E,
+    // the same cost as the scout itself).
     vi.stubGlobal("Game", {
       time: 12345,
       map: { describeExits: vi.fn().mockReturnValue({ "1": "W2N2" }) },
@@ -731,11 +733,35 @@ describe("runSpawning", () => {
     vi.stubGlobal("Memory", { rooms: {} });
     const spawn = mockSpawn(false);
 
-    runSpawning(spawn, mockRoom({ energyAvailable: 50 }));
+    runSpawning(spawn, mockRoom());
 
     expect(spawn.spawnCreep).toHaveBeenCalledWith([MOVE], "scout_12345", {
       memory: { role: "scout", working: false, homeRoom: "W1N1", remoteRoom: "W2N2" }
     });
+  });
+
+  it("does not let a scout preempt an active hostile threat", () => {
+    vi.stubGlobal("Game", {
+      time: 12345,
+      map: { describeExits: vi.fn().mockReturnValue({ "1": "W2N2" }) },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+    const spawn = mockSpawn(false);
+    const room = mockRoom();
+    (room.find as ReturnType<typeof vi.fn>).mockImplementation((type: FindConstant) => {
+      if (type === FIND_HOSTILE_CREEPS) return [{ id: "hostile1" }];
+      if (type === FIND_SOURCES_ACTIVE) return [{ id: "source1", pos: sourcePos }];
+      return [];
+    });
+
+    runSpawning(spawn, room);
+
+    expect(spawn.spawnCreep).not.toHaveBeenCalledWith(
+      [MOVE],
+      "scout_12345",
+      expect.anything()
+    );
   });
 
   it("spawns a keeperHarvester only once local needs are met and there's no remote-mining candidate to resolve", () => {
