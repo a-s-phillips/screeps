@@ -78,6 +78,12 @@ declare global {
     // whatever remote/colonizer work is in flight instead. A live Memory edit, not a
     // code change - flip it and back without a redeploy.
     doctrine?: Doctrine;
+    // Reservation-contest concession state - see remoteSpawnManager.ts's
+    // isReservationContestConceded. Set on the room being contested (not the home room
+    // contesting it), once that fight is judged unwinnable at the home room's current
+    // capacity; cleared automatically the moment a genuine vision-backed reading shows
+    // it's become winnable again.
+    reservationContest?: { concededAtTick: number };
   }
 }
 

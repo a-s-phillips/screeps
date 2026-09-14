@@ -39,6 +39,79 @@ export const RESERVER_TRAVEL_ESTIMATE = 91;
 // outright) than with an ever-larger one of our own.
 export const MAX_RESERVER_CLAIM_PARTS = 3;
 
+// The largest CLAIM-part reserver this room's own energyCapacityAvailable could ever
+// build, capped at MAX_RESERVER_CLAIM_PARTS regardless of how much capacity is available
+// past that point - a room contesting a reservation can never usefully aim higher than
+// this, no matter how many CLAIM parts a rival fields. Distinct from "unaffordable this
+// tick": that's energyAvailable dipping temporarily below what the room could build at
+// full capacity; this is a hard ceiling on what the room could ever build, used to tell
+// a reservation contest that's merely short on energy right now from one that's
+// structurally unwinnable at this room's current RCL (see
+// RESERVATION_CONTEST_CONCESSION_TICKS below for why that distinction matters).
+export function maxAffordableReserverClaimParts(energyCapacityAvailable: number): number {
+  const claimPartCost = BODYPART_COST[CLAIM] + BODYPART_COST[MOVE];
+  return Math.min(Math.floor(energyCapacityAvailable / claimPartCost), MAX_RESERVER_CLAIM_PARTS);
+}
+
+// Found live: a rival fielding more CLAIM parts than this room could ever afford (even
+// at full energyCapacityAvailable, not just this tick's energyAvailable) makes
+// decideNextRemoteSpawn's reinforcement check size a body toward a target it can never
+// reach - and because a CLAIM-bearing creep's lifetime is CREEP_CLAIM_LIFE_TIME (600
+// ticks), not the usual 1500, that undersized reserver dies and gets blindly re-attempted
+// roughly twice as often as an ordinary economy creep, forever. W57N24's contest against
+// W57N23 did exactly this: 241 reserver spawns over ~174k ticks, ~156,650 energy, chasing
+// a fight that was arithmetically unwinnable the entire time (rival held 2 CLAIM parts
+// against a room that could only ever afford 1). 5x a CLAIM creep's 600-tick lifetime, so
+// a concession survives several consecutive would-be-respawn cycles instead of
+// re-triggering on the very next one the moment vision lapses (see
+// isReservationContestConceded's own comment on why vision loss alone must not lift it).
+export const RESERVATION_CONTEST_CONCESSION_TICKS = 3000;
+
+// Reservation-contest concession state (see RoomMemory.reservationContest) is tracked
+// per remote room, not per home room - a remote room only ever belongs to one home room
+// in this codebase's scheme, so the remote room's own Memory entry is the natural place
+// for it, same convention as remoteIntel/keeperIntel.
+
+// True when this room should NOT attempt to reinforce a reservation-contest reserver
+// this tick - either because the fight is currently unwinnable at this room's own
+// capacity, or because it was recently judged unwinnable and hasn't had a real
+// (vision-backed) chance to prove otherwise since.
+//
+// countHostileReservationClaimParts's file-wide convention is "no vision -> assume 0
+// pressure" (see its own comment) - correct for sizing a body, since there's nothing
+// better to go on, but wrong for lifting a concession: the instant a conceded room's
+// last reserver dies, vision is lost and the rival's true CLAIM count would read back as
+// 0, which would otherwise look "winnable" and immediately re-trigger the exact doomed
+// minimal attempt that got this room conceded in the first place. So a concession only
+// lifts early on a *genuine* vision-backed reading showing the fight has actually become
+// winnable (the rival backed off, or this room's capacity grew) - a blind reading during
+// an active cooldown is not trusted either way, and the concession simply holds until the
+// cooldown expires on its own.
+function isReservationContestConceded(
+  remoteRoomName: string,
+  hasVision: boolean,
+  targetClaimParts: number,
+  maxAffordableClaimParts: number
+): boolean {
+  const memory = Memory.rooms[remoteRoomName] ?? (Memory.rooms[remoteRoomName] = {});
+  const concededAtTick = memory.reservationContest?.concededAtTick;
+  const cooldownActive =
+    concededAtTick !== undefined && Game.time - concededAtTick < RESERVATION_CONTEST_CONCESSION_TICKS;
+
+  if (cooldownActive && !hasVision) return true;
+
+  const winnable = maxAffordableClaimParts >= targetClaimParts;
+  if (winnable) {
+    delete memory.reservationContest;
+    return false;
+  }
+
+  if (!cooldownActive) {
+    memory.reservationContest = { concededAtTick: Game.time };
+  }
+  return true;
+}
+
 // A source regenerates SOURCE_ENERGY_CAPACITY every ENERGY_REGEN_TIME ticks - the same
 // sustained-yield expression bodyPlanner.ts's SOURCE_SATURATION_WORK is built from.
 const SOURCE_YIELD_PER_TICK = SOURCE_ENERGY_CAPACITY / ENERGY_REGEN_TIME;
@@ -499,22 +572,34 @@ export function decideNextRemoteSpawn(state: RemoteRoomState): SpawnDecision | n
     const neededClaimParts = state.hostileReservationClaimParts + 1;
     const targetClaimParts = Math.min(neededClaimParts, MAX_RESERVER_CLAIM_PARTS);
     if (state.ourReserverClaimParts < targetClaimParts) {
-      const body = planReserverBody(targetClaimParts - state.ourReserverClaimParts);
-      if (bodyCost(body) <= state.energyAvailable) {
-        return {
-          role: "reserver",
-          body,
-          memory: { homeRoom: state.homeRoomName, remoteRoom: state.remoteRoomName }
-        };
+      const hasVision = Game.rooms[state.remoteRoomName] !== undefined;
+      const maxAffordable = maxAffordableReserverClaimParts(state.energyCapacityAvailable);
+      const conceded = isReservationContestConceded(
+        state.remoteRoomName,
+        hasVision,
+        targetClaimParts,
+        maxAffordable
+      );
+
+      if (!conceded) {
+        const body = planReserverBody(targetClaimParts - state.ourReserverClaimParts);
+        if (bodyCost(body) <= state.energyAvailable) {
+          return {
+            role: "reserver",
+            body,
+            memory: { homeRoom: state.homeRoomName, remoteRoom: state.remoteRoomName }
+          };
+        }
       }
-      // Only hard-block behind an unaffordable reinforcement when there's no reserver
-      // presence at all - vision/reservation has to come from somewhere first. An
-      // established room that already has a reserver out there but just can't afford (or
-      // has capped out) its next top-up shouldn't have miner/remoteHarvester/remoteHauler
-      // starved behind a reservation fight it's already chosen not to keep escalating -
-      // found live: W57N24's contest alone drove 241 reserver spawns over ~174k ticks
-      // while remoteHauler sat at zero population 63% of that time, because this used to
-      // return null unconditionally here regardless of whether a reserver already existed.
+      // Only hard-block behind an unaffordable (or conceded) reinforcement when there's
+      // no reserver presence at all - vision/reservation has to come from somewhere
+      // first. An established room that already has a reserver out there but just can't
+      // afford (or has capped out, or has conceded) its next top-up shouldn't have
+      // miner/remoteHarvester/remoteHauler starved behind a reservation fight it's
+      // already chosen not to keep escalating - found live: W57N24's contest alone drove
+      // 241 reserver spawns over ~174k ticks while remoteHauler sat at zero population
+      // 63% of that time, because this used to return null unconditionally here
+      // regardless of whether a reserver already existed.
       if (state.reserverCount === 0) return null;
     }
   }

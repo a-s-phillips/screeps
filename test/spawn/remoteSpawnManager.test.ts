@@ -6,8 +6,10 @@ import {
   decideScoutSpawn,
   decideScoutSpawnForRoom,
   MAX_RESERVER_CLAIM_PARTS,
+  maxAffordableReserverClaimParts,
   remoteHaulerTarget,
-  RemoteRoomState
+  RemoteRoomState,
+  RESERVATION_CONTEST_CONCESSION_TICKS
 } from "../../src/spawn/remoteSpawnManager";
 import { resetRoomCache } from "../../src/utils/roomCache";
 
@@ -444,6 +446,15 @@ describe("remoteHaulerTarget", () => {
 });
 
 describe("decideNextRemoteSpawn", () => {
+  // Reservation-contest concession state (see isReservationContestConceded in
+  // remoteSpawnManager.ts) writes into Memory.rooms - this block predates that and
+  // otherwise never touches Memory, so without a reset a concession written by one test
+  // (several below reuse "W8N8" with an unwinnable contest) would silently leak into the
+  // next one's shared default Memory.rooms object.
+  beforeEach(() => {
+    Memory.rooms = {};
+  });
+
   it("spawns a reserver when there is none yet", () => {
     const decision = decideNextRemoteSpawn(baseRemoteState());
 
@@ -717,6 +728,213 @@ function mockUnownedRemoteRoom(opts: { name: string; constructionSiteCount?: num
     find: vi.fn((type: FindConstant) => (type === FIND_CONSTRUCTION_SITES ? sites : []))
   };
 }
+
+describe("maxAffordableReserverClaimParts", () => {
+  it("returns 0 below the cost of a single CLAIM+MOVE pair", () => {
+    expect(maxAffordableReserverClaimParts(649)).toBe(0);
+  });
+
+  it("returns exactly how many CLAIM+MOVE pairs the capacity divides into", () => {
+    expect(maxAffordableReserverClaimParts(650)).toBe(1);
+    expect(maxAffordableReserverClaimParts(1300)).toBe(2);
+    expect(maxAffordableReserverClaimParts(1299)).toBe(1);
+  });
+
+  it("caps at MAX_RESERVER_CLAIM_PARTS no matter how much capacity is available", () => {
+    expect(maxAffordableReserverClaimParts(100000)).toBe(MAX_RESERVER_CLAIM_PARTS);
+  });
+});
+
+describe("decideNextRemoteSpawn > reservation contest concession", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("does not reinforce a reservation contest that needs more CLAIM parts than this room could ever afford", () => {
+    // energyCapacityAvailable 1000 can only ever build 1 CLAIM part (see
+    // maxAffordableReserverClaimParts); a rival fielding 5 forces target to the
+    // MAX_RESERVER_CLAIM_PARTS cap of 3, which this room can never reach.
+    vi.stubGlobal("Game", {
+      time: 1000,
+      rooms: { W8N8: mockUnownedRemoteRoom({ name: "W8N8" }) },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        ourReserverClaimParts: 1,
+        hostileReservationClaimParts: 5,
+        energyAvailable: 1000,
+        energyCapacityAvailable: 1000
+      })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  it("still falls through to an economy role once conceded, same as a merely-unaffordable reinforcement", () => {
+    vi.stubGlobal("Game", {
+      time: 1000,
+      rooms: { W8N8: mockUnownedRemoteRoom({ name: "W8N8" }) },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        ourReserverClaimParts: 1,
+        hostileReservationClaimParts: 5,
+        energyAvailable: 1000,
+        energyCapacityAvailable: 1000,
+        sourcesWithoutContainerCount: 1
+      })
+    );
+
+    expect(decision?.role).toBe("remoteHarvester");
+  });
+
+  it("still reinforces up to its own affordability ceiling when the fight is winnable, unaffected by the concession check", () => {
+    vi.stubGlobal("Game", { time: 1000, rooms: {}, creeps: {} });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        ourReserverClaimParts: 1,
+        hostileReservationClaimParts: 2,
+        energyAvailable: 5000,
+        energyCapacityAvailable: 5000
+      })
+    );
+
+    expect(decision?.role).toBe("reserver");
+    expect(decision?.body).toEqual([CLAIM, MOVE, CLAIM, MOVE]);
+  });
+
+  it("keeps a fight conceded for RESERVATION_CONTEST_CONCESSION_TICKS even once our last reserver dies and vision is lost", () => {
+    vi.stubGlobal("Game", {
+      time: 1000,
+      rooms: { W8N8: mockUnownedRemoteRoom({ name: "W8N8" }) },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    // First tick: real vision shows an unwinnable fight - concedes.
+    decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        ourReserverClaimParts: 1,
+        hostileReservationClaimParts: 5,
+        energyAvailable: 1000,
+        energyCapacityAvailable: 1000
+      })
+    );
+
+    // Later tick, still inside the cooldown: the reserver has died (reserverCount back
+    // to 0) and vision went with it. A blind reading would default
+    // hostileReservationClaimParts to 0 and look winnable, but the concession must hold
+    // anyway rather than sending another doomed minimal reserver in to find out again.
+    vi.stubGlobal("Game", {
+      time: 1000 + RESERVATION_CONTEST_CONCESSION_TICKS - 1,
+      rooms: {},
+      creeps: {}
+    });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 0,
+        ourReserverClaimParts: 0,
+        hostileReservationClaimParts: 0,
+        energyAvailable: 1000,
+        energyCapacityAvailable: 1000
+      })
+    );
+
+    expect(decision).toBeNull();
+  });
+
+  it("lifts a concession early on a genuine vision-backed reading once the fight becomes winnable", () => {
+    vi.stubGlobal("Game", {
+      time: 1000,
+      rooms: { W8N8: mockUnownedRemoteRoom({ name: "W8N8" }) },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        ourReserverClaimParts: 1,
+        hostileReservationClaimParts: 5,
+        energyAvailable: 1000,
+        energyCapacityAvailable: 1000
+      })
+    );
+
+    // Still mid-cooldown, but this time we have real vision (a creep of ours is still
+    // there) and the rival has genuinely backed off to something this room can now beat.
+    vi.stubGlobal("Game", {
+      time: 1500,
+      rooms: { W8N8: mockUnownedRemoteRoom({ name: "W8N8" }) },
+      creeps: {}
+    });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 0,
+        ourReserverClaimParts: 0,
+        hostileReservationClaimParts: 0,
+        energyAvailable: 1000,
+        energyCapacityAvailable: 1000
+      })
+    );
+
+    expect(decision?.role).toBe("reserver");
+  });
+
+  it("re-evaluates once the cooldown expires, even without vision", () => {
+    vi.stubGlobal("Game", {
+      time: 1000,
+      rooms: { W8N8: mockUnownedRemoteRoom({ name: "W8N8" }) },
+      creeps: {}
+    });
+    vi.stubGlobal("Memory", { rooms: {} });
+
+    decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 1,
+        ourReserverClaimParts: 1,
+        hostileReservationClaimParts: 5,
+        energyAvailable: 1000,
+        energyCapacityAvailable: 1000
+      })
+    );
+
+    // Cooldown has fully elapsed and there's no vision (last reserver long dead) - a
+    // blind reading defaults to 0 hostile CLAIM parts, which looks winnable, so this is
+    // allowed one fresh (cheap) probe rather than staying conceded forever.
+    vi.stubGlobal("Game", {
+      time: 1000 + RESERVATION_CONTEST_CONCESSION_TICKS,
+      rooms: {},
+      creeps: {}
+    });
+
+    const decision = decideNextRemoteSpawn(
+      baseRemoteState({
+        reserverCount: 0,
+        ourReserverClaimParts: 0,
+        hostileReservationClaimParts: 0,
+        energyAvailable: 1000,
+        energyCapacityAvailable: 1000
+      })
+    );
+
+    expect(decision?.role).toBe("reserver");
+  });
+});
 
 describe("decideNextRemoteSpawn > colonizer", () => {
   afterEach(() => {
